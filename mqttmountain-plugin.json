@@ -1,0 +1,23 @@
+{
+    "id": "com.finalpi.dji-shangyun",
+    "name": "大疆上云 API（Dock 3）",
+    "version": "1.0.0",
+    "description": "解析大疆上云 API Dock 3 属性/状态/事件/HMS 消息，并提供常用 services 指令模板。协议参考：https://developer.dji.com/doc/cloud-api-tutorial/cn/",
+    "author": "finalpi",
+    "homepage": "https://github.com/finalpi/MQTTMountain-Shangyun-Plugin",
+    "main": "index.js",
+    "engines": { "mqttmountain": ">=1.0.0" },
+    "topicPatterns": [
+        "thing/product/+/state",
+        "thing/product/+/state_reply",
+        "thing/product/+/osd",
+        "thing/product/+/events",
+        "thing/product/+/events_reply",
+        "thing/product/+/requests",
+        "thing/product/+/requests_reply",
+        "thing/product/+/services",
+        "thing/product/+/services_reply",
+        "sys/product/+/status",
+        "sys/product/+/status_reply"
+    ]
+}
