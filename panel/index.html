@@ -579,6 +579,17 @@
       });
     }
 
+    function logTimeRange(entries) {
+      if (!entries.length) return null;
+      let min = entries[0].startTime;
+      let max = entries[0].endTime;
+      entries.forEach((item) => {
+        if (item.startTime < min) min = item.startTime;
+        if (item.endTime > max) max = item.endTime;
+      });
+      return { min, max };
+    }
+
     function currentUploadProgress(snapshot) {
       const messages = (snapshot && snapshot.messages ? snapshot.messages : []).slice().reverse();
       const latest = new Map();
@@ -712,6 +723,11 @@
       const reply = await waitForServiceAck('fileupload_list', sent.ids, sent.time, 30000);
       state.logEntries = flattenLogEntries(parseRowBody(reply));
       state.selectedLogKeys = {};
+      const range = logTimeRange(state.logEntries);
+      if (range) {
+        logStartTime.value = formatDateInput(range.min);
+        logEndTime.value = formatDateInput(range.max);
+      }
     }
 
     async function startFileUpload() {
@@ -1022,14 +1038,18 @@
       const rows = filteredLogEntries();
       const selectedCount = rows.filter((item) => state.selectedLogKeys[logEntryKey(item)]).length;
       const totalBytes = rows.reduce((sum, item) => sum + item.size, 0);
+      const rawBytes = state.logEntries.reduce((sum, item) => sum + item.size, 0);
       logStats.innerHTML = [
-        `<span>查询结果 ${rows.length} 条</span>`,
+        `<span>筛选结果 ${rows.length} / 原始 ${state.logEntries.length} 条</span>`,
         `<span>已选 ${selectedCount} 条</span>`,
-        `<span>总大小 ${bytesText(totalBytes)}</span>`
+        `<span>筛选大小 ${bytesText(totalBytes)}</span>`,
+        `<span>原始大小 ${bytesText(rawBytes)}</span>`
       ].join('');
 
       if (!rows.length) {
-        logList.innerHTML = '<div class="empty">先点击“查询可上传日志”，或者调整时间范围后再筛选。</div>';
+        logList.innerHTML = state.logEntries.length
+          ? '<div class="empty">日志已经查到了，但被当前时间范围、模块或无人机筛选挡住了。现在查询成功后会自动把时间范围定位到返回日志区间，你也可以手动放宽筛选。</div>'
+          : '<div class="empty">先点击“查询可上传日志”，或者调整时间范围后再筛选。</div>';
       } else {
         logList.innerHTML = rows.map((item) => {
           const key = logEntryKey(item);
