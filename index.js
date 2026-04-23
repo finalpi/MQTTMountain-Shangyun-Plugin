@@ -203,16 +203,6 @@ module.exports = {
         ctx.log('DJI 上云插件已激活');
     },
 
-    views: [
-        {
-            id: 'shangyun-mqtt',
-            name: '上云 MQTT',
-            description: '机场 / 无人机 / 回调专用视图',
-            placement: 'center',
-            type: 'cloud-mqtt'
-        }
-    ],
-
     senders: () => ([
         createSender('debug.drone_open', '开启飞行器', '机场调试', 'debug_drone_open'),
         createSender('debug.drone_close', '关闭飞行器', '机场调试', 'debug_drone_close'),
