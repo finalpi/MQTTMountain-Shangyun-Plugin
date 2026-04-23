@@ -201,6 +201,15 @@
       return `${item.time}:${item.topic}:${item.payload}`;
     }
 
+    function closestHistoryItem(target) {
+      let el = target && target.nodeType === 1 ? target : target && target.parentElement ? target.parentElement : null;
+      while (el) {
+        if (el.classList && el.classList.contains('history-item')) return el;
+        el = el.parentElement;
+      }
+      return null;
+    }
+
     function cloudMeta(row) {
       const meta = row && row.decoded && row.decoded.meta;
       return meta && meta.family === 'dji-shangyun' ? meta : null;
@@ -498,7 +507,7 @@
     });
 
     historyList.addEventListener('click', (event) => {
-      const item = event.target && event.target.closest ? event.target.closest('.history-item') : null;
+      const item = closestHistoryItem(event.target);
       if (!item) return;
       state.selectedHistoryKey = item.getAttribute('data-key');
       lastRenderToken = '';

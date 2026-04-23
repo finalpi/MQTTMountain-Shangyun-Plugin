@@ -267,7 +267,7 @@ function createDebugSender(id, name, method) {
         id,
         name,
         group: '调试模式',
-        topic: 'thing/product/{sn}/services',
+        topic: 'thing/product/{airportSn}/services',
         payloadTemplate: JSON.stringify({
             tid: '{tid}',
             bid: '{bid}',
@@ -276,7 +276,7 @@ function createDebugSender(id, name, method) {
         }).replace('"{ts}__NUM__"', '{ts}'),
         qos: 1,
         params: [
-            { key: 'sn', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' },
+            { key: 'airportSn', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' },
             { key: 'tid', label: 'tid', default: uuid },
             { key: 'bid', label: 'bid', default: uuid },
             { key: 'ts', label: 'timestamp (ms)', type: 'number', default: now }
@@ -288,7 +288,7 @@ function createCommandSender({ id, name, method, group = '快捷控制' }) {
     const uuid = crypto.randomUUID();
     const now = Date.now();
     const params = [
-        { key: 'sn', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' }
+        { key: 'airportSn', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' }
     ];
     params.push(
         { key: 'tid', label: 'tid', default: uuid },
@@ -307,7 +307,7 @@ function createCommandSender({ id, name, method, group = '快捷控制' }) {
         id,
         name,
         group,
-        topic: 'thing/product/{sn}/services',
+        topic: 'thing/product/{airportSn}/services',
         payloadTemplate: JSON.stringify(payload).replace('"{ts}__NUM__"', '{ts}'),
         qos: 1,
         params
