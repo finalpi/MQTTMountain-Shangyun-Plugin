@@ -1,19 +1,7 @@
-/**
- * MQTTMountain 插件：大疆上云 API（Dock 3）
- *
- * 协议参考：
- *   https://developer.dji.com/doc/cloud-api-tutorial/cn/api-reference/dock-to-cloud/mqtt/dock/dock3/properties.html
- *
- * 覆盖范围：
- *   - 主题识别：thing/product/{sn}/{state|events|osd|services|requests|...}
- *   - 消息解析：method / data / bid / tid / gateway / timestamp
- *   - Dock 3 state 属性中文字段翻译
- *   - 常用 services 指令模板（插件 senders）
- */
-
 'use strict';
 
-// ---------- topic 工具 ----------
+const crypto = require('node:crypto');
+
 const TOPIC_RE = /^(thing|sys)\/product\/([^/]+)\/(.+)$/;
 
 const TOPIC_SUFFIX_LABEL = {
@@ -24,97 +12,95 @@ const TOPIC_SUFFIX_LABEL = {
     events: '事件上报',
     events_reply: '事件应答',
     services: '下行指令',
-    services_reply: '指令应答',
+    services_reply: '指令回调',
     requests: '上行请求',
     requests_reply: '请求应答',
     properties: '属性设置',
-    properties_reply: '属性设置应答',
+    properties_reply: '属性回调',
     status: '设备上线',
     status_reply: '设备上线应答'
 };
 
 const DIR_ICON = {
-    state: '📊',
-    state_reply: '📊',
-    osd: '📡',
-    osd_reply: '📡',
-    events: '🚨',
-    events_reply: '🚨',
-    services: '💬',
-    services_reply: '✅',
-    requests: '📨',
-    requests_reply: '📨',
-    properties: '⚙️',
-    properties_reply: '⚙️',
-    status: '🔌',
-    status_reply: '🔌'
+    state: 'STATE',
+    state_reply: 'STATE',
+    osd: 'OSD',
+    osd_reply: 'OSD',
+    events: 'EVENT',
+    events_reply: 'EVENT',
+    services: 'CALL',
+    services_reply: 'ACK',
+    requests: 'REQ',
+    requests_reply: 'ACK',
+    properties: 'PROP',
+    properties_reply: 'ACK',
+    status: 'STATUS',
+    status_reply: 'ACK'
 };
 
-// ---------- Dock 3 属性字段中文名（节选高频字段） ----------
-// 完整字段参考 https://developer.dji.com/doc/cloud-api-tutorial/cn/api-reference/dock-to-cloud/mqtt/dock/dock3/properties.html
 const DOCK3_FIELD_LABEL = {
     job_number: '作业次数',
-    acc_time: '累计通电时长（秒）',
+    acc_time: '累计通电时长',
     activation_time: '激活时间',
     maintain_status: '维护状态',
-    maintain_status_array: '维护状态数组',
-    electric_supply_voltage: '交流供电电压（V）',
-    working_voltage: '工作电压（mV）',
-    working_current: '工作电流（mA）',
-    acdc_power_input: 'AC/DC 功率输入（W）',
+    electric_supply_voltage: '交流供电电压',
+    working_voltage: '工作电压',
+    working_current: '工作电流',
+    acdc_power_input: 'AC/DC 功率输入',
     poe_link_status: 'POE 连接状态',
     poe_power_output: 'POE 功率输出',
     backup_battery: '备份电池',
-    gimbal_holder_state: '云台收纳状态',
-    drone_battery_maintenance_info: '飞机电池维保信息',
-    temp_mode_state: '温控模式',
-    self_converge_coordinate: '机场自收敛坐标',
-    relative_alternate_land_point: '备降点',
+    drone_battery_maintenance_info: '飞行器电池维护信息',
     deployment_mode: '部署模式',
-    drone_in_dock: '飞机在舱',
-    drone_charge_state: '飞机充电状态',
-    cover_state: '机舱盖状态',
+    drone_in_dock: '机库内无人机',
+    drone_charge_state: '无人机充电状态',
+    cover_state: '舱盖状态',
     supplement_light_state: '补光灯',
     emergency_stop_state: '急停开关',
     air_conditioner_mode: '空调模式',
-    alarm_state: '蜂鸣报警',
+    alarm_state: '告警状态',
     putter_state: '推杆状态',
-    environment_temperature: '环境温度（℃）',
-    environment_humidity: '环境湿度（%）',
+    environment_temperature: '环境温度',
+    environment_humidity: '环境湿度',
     temperature: '温度',
     wind_speed: '风速',
     rainfall: '雨量',
-    first_power_on: '首次上电时间',
     network_state: '网络状态',
-    sdr: 'SDR 链路',
     live_status: '直播状态',
     flighttask_step_code: '任务步骤',
     flighttask_progress: '任务进度'
 };
 
-// ---------- helpers ----------
-function safeParseJson(s) {
-    try { return JSON.parse(s); } catch { return null; }
+function safeParseJson(text) {
+    try {
+        return JSON.parse(text);
+    } catch {
+        return null;
+    }
 }
 
-function truncateVal(v, max = 48) {
-    if (v == null) return '';
-    if (typeof v === 'object') {
-        const s = JSON.stringify(v);
-        return s.length > max ? s.slice(0, max) + '…' : s;
-    }
-    const s = String(v);
-    return s.length > max ? s.slice(0, max) + '…' : s;
+function truncateVal(value, max = 48) {
+    if (value == null) return '';
+    const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+    return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
 function formatTs(ts) {
     if (!ts || typeof ts !== 'number') return '';
-    try { return new Date(ts).toISOString(); } catch { return String(ts); }
+    try {
+        return new Date(ts).toISOString();
+    } catch {
+        return String(ts);
+    }
 }
 
-/**
- * 对 data 里若干关键字段提取为 highlights（只取最常用的几个，避免信息过载）
- */
+function firstString(...values) {
+    for (const value of values) {
+        if (typeof value === 'string' && value.trim()) return value;
+    }
+    return undefined;
+}
+
 function extractDataHighlights(data) {
     if (!data || typeof data !== 'object') return [];
     const priority = [
@@ -125,131 +111,196 @@ function extractDataHighlights(data) {
         'flighttask_step_code', 'live_status'
     ];
     const out = [];
-    for (const k of priority) {
-        if (Object.prototype.hasOwnProperty.call(data, k)) {
-            const label = DOCK3_FIELD_LABEL[k] || k;
-            out.push({ label, value: truncateVal(data[k]) });
-            if (out.length >= 6) break;
-        }
+    for (const key of priority) {
+        if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
+        out.push({ label: DOCK3_FIELD_LABEL[key] || key, value: truncateVal(data[key]) });
+        if (out.length >= 6) break;
     }
     return out;
 }
 
-// ---------- 插件入口 ----------
+function inferDroneSn(body, topicSn) {
+    const data = body && typeof body.data === 'object' ? body.data : {};
+    const droneSn = firstString(
+        body.sub_device,
+        body.subDevice,
+        body.drone_sn,
+        body.droneSn,
+        data.drone_sn,
+        data.droneSn,
+        data.sub_device,
+        data.subDevice
+    );
+    if (droneSn) return droneSn;
+    if (typeof body.gateway === 'string' && body.gateway !== topicSn) return topicSn;
+    return undefined;
+}
+
+function inferMessageMeta(namespace, topicSn, suffix, body) {
+    const isReply = suffix.endsWith('_reply');
+    const gatewaySn = typeof body.gateway === 'string' ? body.gateway : undefined;
+    const airportSn = firstString(gatewaySn, topicSn);
+    const droneSn = inferDroneSn(body, topicSn);
+
+    let messageKind = 'telemetry';
+    if (suffix.includes('event')) messageKind = isReply ? 'reply' : 'event';
+    else if (suffix.includes('service') || suffix.includes('request') || suffix.includes('property')) {
+        messageKind = isReply ? 'reply' : 'request';
+    } else if (suffix.includes('status')) messageKind = 'status';
+    else if (isReply) messageKind = 'reply';
+
+    let direction = 'up';
+    if (suffix.startsWith('services') || suffix.startsWith('properties')) direction = 'down';
+    if (suffix.startsWith('requests')) direction = 'up';
+    if (isReply && (suffix.startsWith('services') || suffix.startsWith('properties'))) direction = 'up';
+
+    return {
+        family: 'dji-shangyun',
+        namespace,
+        airportSn,
+        droneSn,
+        gatewaySn: gatewaySn || airportSn,
+        deviceSn: droneSn || topicSn,
+        topicKind: suffix,
+        messageKind,
+        direction,
+        method: typeof body.method === 'string' ? body.method : undefined,
+        tid: typeof body.tid === 'string' ? body.tid : undefined,
+        bid: typeof body.bid === 'string' ? body.bid : undefined,
+        isReply
+    };
+}
+
+function createSender(id, name, group, action, extraData = {}) {
+    const uuid = crypto.randomUUID();
+    const now = Date.now();
+    return {
+        id,
+        name,
+        group,
+        topic: 'thing/product/{sn}/services',
+        payloadTemplate: JSON.stringify({
+            tid: '{tid}',
+            bid: '{bid}',
+            timestamp: '{ts}__NUM__',
+            method: action.startsWith('debug_') ? 'debug_mode_open' : action,
+            data: action.startsWith('debug_')
+                ? Object.assign({ action: action.replace(/^debug_/, '') }, extraData)
+                : extraData
+        }).replace('"{ts}__NUM__"', '{ts}'),
+        qos: 1,
+        params: [
+            { key: 'sn', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' },
+            { key: 'tid', label: 'tid', default: uuid },
+            { key: 'bid', label: 'bid', default: uuid },
+            { key: 'ts', label: 'timestamp (ms)', type: 'number', default: now }
+        ]
+    };
+}
+
 module.exports = {
     activate(ctx) {
-        ctx.log('DJI 上云 API 插件已激活');
+        ctx.log('DJI 上云插件已激活');
     },
 
-    /** 动态 sender：每次调用生成新 uuid / ts 作为默认值（用户仍可改） */
-    senders: () => {
-        const uuid = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : require('crypto').randomUUID();
-        const now = Date.now();
-        const mk = (id, name, group, action, extraData = {}) => ({
-            id,
-            name,
-            group,
-            topic: 'thing/product/{sn}/services',
-            payloadTemplate: JSON.stringify({
-                tid: `{tid}`,
-                bid: `{bid}`,
-                timestamp: `{ts}__NUM__`,
-                method: action.startsWith('debug_') ? 'debug_mode_open' : action,
-                data: action.startsWith('debug_')
-                    ? Object.assign({ action: action.replace(/^debug_/, '') }, extraData)
-                    : extraData
-            }).replace('"{ts}__NUM__"', '{ts}'), // 让 timestamp 成为数字而非字符串
-            qos: 1,
-            params: [
-                { key: 'sn', label: '机场 SN', required: true, placeholder: '例 8UUXNCJ00A0XWG' },
-                { key: 'tid', label: 'tid（请求标识）', default: uuid },
-                { key: 'bid', label: 'bid（业务流水）', default: uuid },
-                { key: 'ts', label: 'timestamp (ms)', type: 'number', default: now }
-            ]
-        });
+    views: [
+        {
+            id: 'shangyun-mqtt',
+            name: '上云 MQTT',
+            description: '机场 / 无人机 / 回调专用视图',
+            placement: 'center',
+            type: 'cloud-mqtt'
+        }
+    ],
 
-        return [
-            mk('debug.drone_open', '🛩️ 开启飞机', '机场调试', 'debug_drone_open'),
-            mk('debug.drone_close', '🛬 关闭飞机', '机场调试', 'debug_drone_close'),
-            mk('debug.cover_open', '📤 舱盖打开', '机场调试', 'debug_cover_open'),
-            mk('debug.cover_close', '📥 舱盖关闭', '机场调试', 'debug_cover_close'),
-            mk('debug.putter_open', '⬆️ 推杆展开', '机场调试', 'debug_putter_open'),
-            mk('debug.putter_close', '⬇️ 推杆收回', '机场调试', 'debug_putter_close'),
-            mk('debug.charge_open', '🔌 充电开启', '机场调试', 'debug_charge_open'),
-            mk('debug.charge_close', '🔋 充电关闭', '机场调试', 'debug_charge_close'),
-            mk('control.device_reboot', '🔄 机场重启', '机场控制', 'device_reboot'),
-            mk('control.drone_reboot', '🔁 飞机重启', '机场控制', 'drone_reboot'),
-            mk('control.dock_format', '🗑️ 机场格式化', '机场控制', 'dock_format'),
-            mk('control.drone_format', '🗑️ 飞机格式化', '机场控制', 'drone_format'),
-            mk('live.live_start_push', '📹 开始直播推流', '直播', 'live_start_push', {
-                url_type: 1,
-                video_id: '',
-                video_quality: 2,
-                url: ''
-            }),
-            mk('live.live_stop_push', '⏹️ 停止直播推流', '直播', 'live_stop_push')
-        ];
-    },
+    senders: () => ([
+        createSender('debug.drone_open', '开启飞行器', '机场调试', 'debug_drone_open'),
+        createSender('debug.drone_close', '关闭飞行器', '机场调试', 'debug_drone_close'),
+        createSender('debug.cover_open', '打开舱盖', '机场调试', 'debug_cover_open'),
+        createSender('debug.cover_close', '关闭舱盖', '机场调试', 'debug_cover_close'),
+        createSender('debug.putter_open', '展开推杆', '机场调试', 'debug_putter_open'),
+        createSender('debug.putter_close', '收回推杆', '机场调试', 'debug_putter_close'),
+        createSender('debug.charge_open', '开启充电', '机场调试', 'debug_charge_open'),
+        createSender('debug.charge_close', '关闭充电', '机场调试', 'debug_charge_close'),
+        createSender('control.device_reboot', '机场重启', '机场控制', 'device_reboot'),
+        createSender('control.drone_reboot', '无人机重启', '机场控制', 'drone_reboot'),
+        createSender('control.dock_format', '机场格式化', '机场控制', 'dock_format'),
+        createSender('control.drone_format', '无人机格式化', '机场控制', 'drone_format'),
+        createSender('live.live_start_push', '开始直播推流', '直播', 'live_start_push', {
+            url_type: 1,
+            video_id: '',
+            video_quality: 2,
+            url: ''
+        }),
+        createSender('live.live_stop_push', '停止直播推流', '直播', 'live_stop_push')
+    ]),
 
-    /** 给主题列表加中文标签 */
     topicLabel(topic) {
-        const m = topic.match(TOPIC_RE);
-        if (!m) return null;
-        const suffix = m[3];
+        const match = topic.match(TOPIC_RE);
+        if (!match) return null;
+        const suffix = match[3];
         const label = TOPIC_SUFFIX_LABEL[suffix];
         if (!label) return null;
-        return `${DIR_ICON[suffix] || ''} ${label}`.trim();
+        return `${DIR_ICON[suffix] || 'MSG'} ${label}`.trim();
     },
 
-    /** 解析一条消息 */
     decode(topic, payload) {
-        const m = topic.match(TOPIC_RE);
-        if (!m) return null;
+        const match = topic.match(TOPIC_RE);
+        if (!match) return null;
 
-        const ns = m[1];       // thing / sys
-        const sn = m[2];
-        const suffix = m[3];
+        const namespace = match[1];
+        const sn = match[2];
+        const suffix = match[3];
         const suffixLabel = TOPIC_SUFFIX_LABEL[suffix] || suffix;
-        const icon = DIR_ICON[suffix] || '📦';
-
+        const icon = DIR_ICON[suffix] || 'MSG';
         const body = safeParseJson(payload);
+
         if (!body || typeof body !== 'object') {
             return {
-                summary: `${icon} ${suffixLabel} · ${sn} · (非 JSON)`,
+                summary: `${icon} ${suffixLabel} | ${sn} | non-json`,
                 highlights: [
-                    { label: '命名空间', value: ns },
-                    { label: 'SN', value: sn },
-                    { label: '方向', value: suffixLabel }
-                ]
+                    { label: 'namespace', value: namespace },
+                    { label: 'sn', value: sn },
+                    { label: 'topic', value: suffixLabel }
+                ],
+                meta: {
+                    family: 'dji-shangyun',
+                    airportSn: sn,
+                    gatewaySn: sn,
+                    deviceSn: sn,
+                    topicKind: suffix,
+                    messageKind: 'telemetry',
+                    direction: suffix.startsWith('services') ? 'down' : 'up',
+                    isReply: suffix.endsWith('_reply')
+                }
             };
         }
 
-        const method = body.method;
         const parts = [`${icon} ${suffixLabel}`];
-        if (method) parts.push(String(method));
+        if (body.method) parts.push(String(body.method));
 
-        const highlights = [];
-        highlights.push({ label: 'SN', value: sn });
-        if (method) highlights.push({ label: 'method', value: String(method) });
+        const highlights = [{ label: 'SN', value: sn }];
+        if (body.method) highlights.push({ label: 'method', value: String(body.method) });
         if (body.gateway && body.gateway !== sn) highlights.push({ label: 'gateway', value: String(body.gateway) });
         if (body.tid) highlights.push({ label: 'tid', value: String(body.tid) });
         if (body.bid) highlights.push({ label: 'bid', value: String(body.bid) });
         if (body.timestamp) highlights.push({ label: 'timestamp', value: formatTs(body.timestamp) });
+        highlights.push(...extractDataHighlights(body.data));
 
-        const dataHl = extractDataHighlights(body.data);
-        highlights.push(...dataHl);
-
-        // 把 SN / gateway 登记到宿主的「参数记忆」，下次发送时下拉就有
+        const meta = inferMessageMeta(namespace, sn, suffix, body);
         const rememberParams = {};
         if (sn) rememberParams.sn = sn;
-        if (body.gateway && typeof body.gateway === 'string') rememberParams.gateway = body.gateway;
+        if (meta.airportSn) rememberParams.airportSn = meta.airportSn;
+        if (meta.droneSn) rememberParams.droneSn = meta.droneSn;
+        if (meta.gatewaySn) rememberParams.gateway = meta.gatewaySn;
 
         return {
-            summary: parts.join(' · ') + ` · ${sn}`,
+            summary: `${parts.join(' | ')} | ${sn}`,
             highlights,
             topicLabel: `${icon} ${suffixLabel}`,
             rememberParams,
-            tree: body
+            tree: body,
+            meta
         };
     }
 };
