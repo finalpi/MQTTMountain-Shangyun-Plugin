@@ -588,7 +588,7 @@ export function useCloudPanel() {
     if (!selected.length) throw new Error('请先选择要上传的日志');
     const profile = activeOssProfile.value;
     if (!profile) throw new Error('OSS 配置不可用');
-    const required = ['bucket', 'region', 'endpoint', 'access_key_id', 'access_key_secret', 'expire'] as const;
+    const required = ['bucket', 'region', 'endpoint', 'access_key_id', 'access_key_secret'] as const;
     for (const key of required) {
       if (!String(profile[key] || '').trim()) throw new Error(`缺少 OSS 字段: ${key}`);
     }
@@ -603,17 +603,21 @@ export function useCloudPanel() {
       module: String(items[0].module),
       list: items.map((item) => ({ boot_index: item.bootIndex }))
     }));
+    const credentials: Record<string, string | number> = {
+      access_key_id: profile.access_key_id,
+      access_key_secret: profile.access_key_secret
+    };
+    const expireValue = String(profile.expire || '').trim();
+    if (expireValue) credentials.expire = Number(expireValue);
+    const securityToken = String(profile.security_token || '').trim();
+    if (securityToken) credentials.security_token = securityToken;
+
     const payload = {
       bucket: profile.bucket,
       region: profile.region,
       endpoint: profile.endpoint,
       provider: profile.provider,
-      credentials: {
-        access_key_id: profile.access_key_id,
-        access_key_secret: profile.access_key_secret,
-        expire: Number(profile.expire),
-        security_token: profile.security_token
-      },
+      credentials,
       params: { files }
     };
     const sent = await publishService('fileupload_start', airport.value, payload);
