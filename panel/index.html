@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>上云 MQTT</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1220;
+      --panel: rgba(15, 23, 42, 0.88);
+      --panel-soft: rgba(30, 41, 59, 0.82);
+      --line: rgba(148, 163, 184, 0.18);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --good: #34d399;
+      --bad: #f87171;
+      --accent: #38bdf8;
+      --accent-soft: rgba(56, 189, 248, 0.16);
+      --warn: #fbbf24;
+      font-family: "Microsoft YaHei UI", "PingFang SC", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background:
+      radial-gradient(circle at top right, rgba(56,189,248,0.12), transparent 28%),
+      radial-gradient(circle at top left, rgba(52,211,153,0.08), transparent 25%),
+      linear-gradient(180deg, #0b1220, #111827 60%, #0f172a);
+      color: var(--text);
+    }
+    body { padding: 16px; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    .page { display: flex; flex-direction: column; gap: 14px; min-height: calc(100vh - 32px); }
+    .topbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .badge, .status-pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 7px 12px; border-radius: 999px;
+      background: rgba(15,23,42,0.78); border: 1px solid var(--line); color: var(--muted);
+    }
+    .status-pill.enabled { color: var(--good); border-color: rgba(52,211,153,0.28); background: rgba(52,211,153,0.12); }
+    .status-pill.disabled { color: var(--bad); border-color: rgba(248,113,113,0.26); background: rgba(248,113,113,0.1); }
+    .toolbar {
+      display: grid; grid-template-columns: repeat(2, minmax(180px, 240px)) 1fr;
+      gap: 12px; align-items: end;
+    }
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field span { font-size: 12px; color: var(--muted); }
+    select, input, .action-button {
+      min-height: 40px; border-radius: 12px; border: 1px solid var(--line);
+      background: rgba(15,23,42,0.72); color: var(--text); padding: 0 12px;
+    }
+    .action-button {
+      background: linear-gradient(135deg, rgba(56,189,248,0.24), rgba(14,165,233,0.16));
+      color: #e0f2fe; font-weight: 700;
+    }
+    .action-button[disabled] { cursor: not-allowed; opacity: 0.5; }
+    .status-card {
+      background: linear-gradient(135deg, rgba(30,41,59,0.92), rgba(15,23,42,0.9));
+      border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px;
+      display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    }
+    .status-main { display: flex; flex-direction: column; gap: 8px; }
+    .status-title { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; }
+    .status-value { font-size: 28px; font-weight: 800; }
+    .status-meta { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 12px; font-family: Consolas, monospace; }
+    .layout {
+      flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 14px;
+    }
+    .panel {
+      min-height: 0; display: flex; flex-direction: column; background: var(--panel);
+      border: 1px solid var(--line); border-radius: 18px; overflow: hidden; backdrop-filter: blur(10px);
+    }
+    .panel-head {
+      padding: 12px 14px; border-bottom: 1px solid var(--line); color: var(--muted);
+      font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
+    }
+    .panel-body { flex: 1; min-height: 0; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+    .history-item, .message-card, .summary-block {
+      border: 1px solid var(--line); border-radius: 14px; padding: 12px;
+      background: var(--panel-soft); user-select: text;
+    }
+    .history-item { cursor: pointer; }
+    .history-item.active { border-color: rgba(56,189,248,0.42); box-shadow: 0 0 0 1px rgba(56,189,248,0.2) inset; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .row + .row { margin-top: 8px; }
+    .method { font-weight: 700; color: #f8fafc; }
+    .time { margin-left: auto; color: var(--muted); font-size: 12px; font-family: Consolas, monospace; }
+    .mini { color: var(--muted); font-size: 12px; }
+    .pill {
+      display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+      border: 1px solid var(--line); font-size: 11px; color: var(--muted);
+    }
+    .pill.reply { color: var(--good); border-color: rgba(52,211,153,0.26); background: rgba(52,211,153,0.12); }
+    pre {
+      margin: 8px 0 0; padding: 12px; border-radius: 12px; background: rgba(2,6,23,0.56);
+      white-space: pre-wrap; word-break: break-all; overflow: auto; line-height: 1.55;
+      font-family: Consolas, "JetBrains Mono", monospace; font-size: 12px; color: #cbd5e1;
+    }
+    .empty { color: var(--muted); padding: 24px; text-align: center; }
+    .stack { display: flex; flex-direction: column; gap: 12px; }
+    @media (max-width: 980px) {
+      body { padding: 12px; }
+      .toolbar { grid-template-columns: 1fr; }
+      .layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="topbar">
+      <div id="connectionBadge" class="badge">连接未选择</div>
+      <div id="debugPill" class="status-pill">Debug 未识别</div>
+      <div id="statsBadge" class="badge">0 条发送 / 0 条回调</div>
+    </div>
+
+    <div class="toolbar">
+      <label class="field">
+        <span>机场</span>
+        <select id="airportSelect"></select>
+      </label>
+      <label class="field">
+        <span>无人机</span>
+        <select id="droneSelect"></select>
+      </label>
+      <button id="debugToggle" class="action-button">开启 Debug</button>
+    </div>
+
+    <div class="status-card">
+      <div class="status-main">
+        <div class="status-title">当前 Debug 状态</div>
+        <div id="statusValue" class="status-value">暂未识别</div>
+        <div id="statusMeta" class="status-meta"></div>
+      </div>
+      <div class="status-main">
+        <div class="status-title">说明</div>
+        <div class="mini">插件页面已完全运行在插件仓库中。宿主只负责提供消息快照与发送能力。</div>
+      </div>
+    </div>
+
+    <div class="layout">
+      <section class="panel">
+        <div class="panel-head">发送历史</div>
+        <div id="historyList" class="panel-body"></div>
+      </section>
+      <section class="panel">
+        <div class="panel-head">详情</div>
+        <div id="detailPane" class="panel-body"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const host = window.MqttMountainHost || {};
+    const bridge = host.bridge;
+    const state = {
+      airport: 'all',
+      drone: 'all',
+      selectedHistoryKey: null,
+      snapshot: null
+    };
+
+    const airportSelect = document.getElementById('airportSelect');
+    const droneSelect = document.getElementById('droneSelect');
+    const connectionBadge = document.getElementById('connectionBadge');
+    const debugPill = document.getElementById('debugPill');
+    const statsBadge = document.getElementById('statsBadge');
+    const statusValue = document.getElementById('statusValue');
+    const statusMeta = document.getElementById('statusMeta');
+    const debugToggle = document.getElementById('debugToggle');
+    const historyList = document.getElementById('historyList');
+    const detailPane = document.getElementById('detailPane');
+
+    function safeParse(text) {
+      try { return JSON.parse(text); } catch { return null; }
+    }
+
+    function timeText(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function shortTime(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function historyKey(item) {
+      return `${item.time}:${item.topic}:${item.payload}`;
+    }
+
+    function cloudMeta(row) {
+      const meta = row && row.decoded && row.decoded.meta;
+      return meta && meta.family === 'dji-shangyun' ? meta : null;
+    }
+
+    function parsePublishMeta(item) {
+      const topicParts = String(item.topic || '').split('/');
+      const airportSn = (topicParts[0] === 'thing' || topicParts[0] === 'sys') ? topicParts[2] : undefined;
+      const parsed = safeParse(item.payload) || {};
+      const data = parsed.data && typeof parsed.data === 'object' ? parsed.data : {};
+      const pick = (...values) => values.find((value) => typeof value === 'string' && value.trim());
+      return {
+        airportSn,
+        droneSn: pick(parsed.drone_sn, parsed.droneSn, data.drone_sn, data.droneSn, parsed.sub_device, data.sub_device),
+        tid: typeof parsed.tid === 'string' ? parsed.tid : undefined,
+        bid: typeof parsed.bid === 'string' ? parsed.bid : undefined,
+        method: typeof parsed.method === 'string' ? parsed.method : undefined
+      };
+    }
+
+    function getSnapshot() {
+      return bridge && typeof bridge.getSnapshot === 'function' ? bridge.getSnapshot() : null;
+    }
+
+    function renderSelect(selectEl, values, current, allLabel) {
+      const opts = ['<option value="all">' + allLabel + '</option>']
+        .concat(values.map((value) => `<option value="${value}">${value}</option>`))
+        .join('');
+      selectEl.innerHTML = opts;
+      selectEl.value = values.includes(current) || current === 'all' ? current : 'all';
+    }
+
+    function buildModel(snapshot) {
+      const messages = (snapshot.messages || []).slice().reverse().filter((row) => cloudMeta(row));
+      const publishEntries = (snapshot.publishHistory || []).slice().reverse().map((item) => ({
+        key: historyKey(item),
+        item,
+        meta: parsePublishMeta(item)
+      }));
+      const airportSet = new Set();
+      const droneSet = new Set();
+      publishEntries.forEach((entry) => {
+        if (entry.meta.airportSn) airportSet.add(entry.meta.airportSn);
+        if (entry.meta.droneSn) droneSet.add(entry.meta.droneSn);
+      });
+      messages.forEach((row) => {
+        const meta = cloudMeta(row);
+        if (!meta) return;
+        if (meta.airportSn) airportSet.add(meta.airportSn);
+        if (meta.droneSn) droneSet.add(meta.droneSn);
+      });
+      (snapshot.paramSuggestions.airportSn || []).forEach((value) => airportSet.add(value));
+      (snapshot.paramSuggestions.gateway || []).forEach((value) => airportSet.add(value));
+      (snapshot.paramSuggestions.droneSn || []).forEach((value) => droneSet.add(value));
+
+      const airportOptions = Array.from(airportSet).filter(Boolean).sort();
+      const droneOptions = Array.from(droneSet).filter(Boolean).sort();
+      const filteredHistory = publishEntries.filter((entry) => {
+        if (state.airport !== 'all' && entry.meta.airportSn !== state.airport) return false;
+        if (state.drone !== 'all' && entry.meta.droneSn !== state.drone) return false;
+        return true;
+      });
+
+      if (!filteredHistory.some((entry) => entry.key === state.selectedHistoryKey)) {
+        state.selectedHistoryKey = filteredHistory[0] ? filteredHistory[0].key : null;
+      }
+
+      const selectedEntry = filteredHistory.find((entry) => entry.key === state.selectedHistoryKey) || null;
+      const relatedRows = selectedEntry ? messages
+        .filter((row) => {
+          const meta = cloudMeta(row);
+          if (!meta || row.time < selectedEntry.item.time) return false;
+          if (selectedEntry.meta.tid && meta.tid === selectedEntry.meta.tid) return true;
+          if (selectedEntry.meta.bid && meta.bid === selectedEntry.meta.bid) return true;
+          return false;
+        })
+        .sort((a, b) => a.time - b.time) : [];
+      const callbackRows = relatedRows.filter((row) => {
+        const meta = cloudMeta(row);
+        return meta && meta.isReply;
+      });
+
+      let debugStatus = { state: 'unknown', time: 0, method: '', modeCode: null };
+      for (const row of messages) {
+        const meta = cloudMeta(row);
+        if (!meta || !meta.debugState) continue;
+        debugStatus = {
+          state: meta.debugState,
+          time: row.time,
+          method: meta.method || '',
+          modeCode: typeof meta.modeCode === 'number' ? meta.modeCode : null
+        };
+        break;
+      }
+
+      return {
+        snapshot,
+        airportOptions,
+        droneOptions,
+        filteredHistory,
+        selectedEntry,
+        relatedRows,
+        callbackRows,
+        debugStatus
+      };
+    }
+
+    function renderHistory(model) {
+      if (!model.filteredHistory.length) {
+        historyList.innerHTML = '<div class="empty">当前筛选下没有发送记录。</div>';
+        return;
+      }
+      historyList.innerHTML = model.filteredHistory.map((entry) => `
+        <article class="history-item ${entry.key === state.selectedHistoryKey ? 'active' : ''}" data-key="${entry.key}">
+          <div class="row">
+            <div class="method">${entry.meta.method || entry.item.topic}</div>
+            <div class="time">${shortTime(entry.item.time)}</div>
+          </div>
+          <div class="row mini">
+            <span>机场 ${entry.meta.airportSn || '-'}</span>
+            <span>无人机 ${entry.meta.droneSn || '-'}</span>
+          </div>
+          <div class="row mini">
+            <span>${entry.meta.tid || entry.meta.bid || '无 tid/bid'}</span>
+          </div>
+        </article>
+      `).join('');
+      historyList.querySelectorAll('.history-item').forEach((el) => {
+        el.addEventListener('click', () => {
+          state.selectedHistoryKey = el.getAttribute('data-key');
+          render();
+        });
+      });
+    }
+
+    function renderDetail(model) {
+      const debugText = model.debugStatus.state === 'enabled' ? '已开启' : model.debugStatus.state === 'disabled' ? '已关闭' : '暂未识别';
+      const metaBits = [];
+      if (model.debugStatus.modeCode !== null) metaBits.push(`mode_code=${model.debugStatus.modeCode}`);
+      if (model.debugStatus.method) metaBits.push(model.debugStatus.method);
+      if (model.debugStatus.time) metaBits.push(timeText(model.debugStatus.time));
+      statusValue.textContent = debugText;
+      statusMeta.innerHTML = metaBits.map((item) => `<span>${item}</span>`).join('');
+
+      if (!model.selectedEntry) {
+        detailPane.innerHTML = '<div class="empty">请选择一条发送记录。</div>';
+        return;
+      }
+
+      const selected = model.selectedEntry;
+      const callbackHtml = model.callbackRows.length
+        ? model.callbackRows.map((row) => {
+            const meta = cloudMeta(row) || {};
+            return `
+              <article class="message-card">
+                <div class="row">
+                  <span class="pill reply">${meta.topicKind || 'reply'}</span>
+                  <span class="method">${meta.method || row.topic}</span>
+                  <span class="time">${timeText(row.time)}</span>
+                </div>
+                <div class="row mini">
+                  ${meta.tid ? `<span>tid ${meta.tid}</span>` : ''}
+                  ${meta.bid ? `<span>bid ${meta.bid}</span>` : ''}
+                </div>
+                <pre>${row.payload}</pre>
+              </article>`;
+          }).join('')
+        : '<div class="empty">这条记录暂时还没有匹配到回调。</div>';
+
+      const relatedHtml = model.relatedRows.length
+        ? model.relatedRows.map((row) => {
+            const meta = cloudMeta(row) || {};
+            return `
+              <article class="message-card">
+                <div class="row">
+                  <span class="pill ${meta.isReply ? 'reply' : ''}">${meta.topicKind || ''}</span>
+                  <span class="method">${meta.method || row.topic}</span>
+                  <span class="time">${timeText(row.time)}</span>
+                </div>
+                <div class="row mini">
+                  <span>机场 ${meta.airportSn || '-'}</span>
+                  <span>无人机 ${meta.droneSn || '-'}</span>
+                  ${meta.tid ? `<span>tid ${meta.tid}</span>` : ''}
+                  ${meta.bid ? `<span>bid ${meta.bid}</span>` : ''}
+                </div>
+                <pre>${row.payload}</pre>
+              </article>`;
+          }).join('')
+        : '<div class="empty">没有找到关联链路消息。</div>';
+
+      detailPane.innerHTML = `
+        <div class="stack">
+          <div class="summary-block">
+            <div class="row"><span class="mini">方法</span><span class="method">${selected.meta.method || selected.item.topic}</span></div>
+            <div class="row"><span class="mini">时间</span><span class="method">${timeText(selected.item.time)}</span></div>
+            <div class="row"><span class="mini">标识</span><span class="method">${selected.meta.tid || selected.meta.bid || '无 tid/bid'}</span></div>
+          </div>
+          <div class="summary-block">
+            <div class="row"><span class="mini">关联回调</span></div>
+            <div class="stack">${callbackHtml}</div>
+          </div>
+          <div class="summary-block">
+            <div class="row"><span class="mini">关联链路消息</span></div>
+            <div class="stack">${relatedHtml}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderTop(model) {
+      const snapshot = model.snapshot;
+      const currentConn = (snapshot.connections || []).find((item) => item.id === snapshot.selectedConnectionId);
+      connectionBadge.textContent = currentConn
+        ? `${currentConn.name} / ${currentConn.state}`
+        : '连接未选择';
+
+      debugPill.className = 'status-pill ' + (model.debugStatus.state === 'enabled' ? 'enabled' : model.debugStatus.state === 'disabled' ? 'disabled' : '');
+      debugPill.textContent = 'Debug ' + (model.debugStatus.state === 'enabled' ? '已开启' : model.debugStatus.state === 'disabled' ? '已关闭' : '未识别');
+      statsBadge.textContent = `${model.filteredHistory.length} 条发送 / ${model.callbackRows.length} 条回调`;
+
+      debugToggle.textContent = model.debugStatus.state === 'enabled' ? '关闭 Debug' : '开启 Debug';
+      debugToggle.disabled = !(snapshot.selectedConnectionId && snapshot.selectedConnectionState === 'connected' && state.airport !== 'all');
+    }
+
+    function render() {
+      const snapshot = getSnapshot();
+      if (!snapshot) return;
+      state.snapshot = snapshot;
+      const model = buildModel(snapshot);
+      renderSelect(airportSelect, model.airportOptions, state.airport, '全部机场');
+      state.airport = airportSelect.value;
+
+      const droneOptions = model.droneOptions.filter((drone) => {
+        if (state.airport === 'all') return true;
+        return model.filteredHistory.some((entry) => entry.meta.airportSn === state.airport && entry.meta.droneSn === drone)
+          || model.snapshot.messages.some((row) => {
+            const meta = cloudMeta(row);
+            return meta && meta.airportSn === state.airport && meta.droneSn === drone;
+          });
+      });
+      renderSelect(droneSelect, droneOptions, state.drone, '全部无人机');
+      state.drone = droneSelect.value;
+
+      const rerendered = buildModel(snapshot);
+      renderTop(rerendered);
+      renderHistory(rerendered);
+      renderDetail(rerendered);
+    }
+
+    airportSelect.addEventListener('change', () => {
+      state.airport = airportSelect.value;
+      state.drone = 'all';
+      render();
+    });
+
+    droneSelect.addEventListener('change', () => {
+      state.drone = droneSelect.value;
+      render();
+    });
+
+    debugToggle.addEventListener('click', async () => {
+      if (!bridge || typeof bridge.publish !== 'function' || state.airport === 'all') return;
+      const method = debugToggle.textContent.includes('关闭') ? 'debug_mode_close' : 'debug_mode_open';
+      const time = Date.now();
+      const payload = JSON.stringify({
+        tid: (crypto.randomUUID ? crypto.randomUUID() : String(time)),
+        bid: (crypto.randomUUID ? crypto.randomUUID() : String(time + 1)),
+        timestamp: time,
+        method
+      });
+      debugToggle.disabled = true;
+      const result = await bridge.publish({
+        topic: `thing/product/${state.airport}/services`,
+        payload,
+        qos: 1,
+        retain: false
+      });
+      if (result && result.success) {
+        state.selectedHistoryKey = historyKey({
+          topic: `thing/product/${state.airport}/services`,
+          payload,
+          time: result.time || time
+        });
+      }
+      render();
+    });
+
+    render();
+    setInterval(render, 1000);
+  </script>
+</body>
+</html>

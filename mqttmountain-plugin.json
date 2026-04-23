@@ -26,7 +26,8 @@
             "name": "上云 MQTT",
             "description": "机场 / 无人机 / 请求回调专用视图",
             "placement": "center",
-            "type": "cloud-mqtt"
+            "type": "web",
+            "entry": "panel/index.html"
         }
     ]
 }
