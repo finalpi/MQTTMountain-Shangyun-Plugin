@@ -39,6 +39,7 @@ const DIR_ICON = {
 };
 
 const DOCK3_FIELD_LABEL = {
+    mode_code: '机场状态',
     job_number: '作业次数',
     acc_time: '累计通电时长',
     activation_time: '激活时间',
@@ -79,6 +80,15 @@ const DEBUG_STATE_KEYS = [
     'debug_enabled'
 ];
 
+const MODE_CODE_LABEL = {
+    0: '空闲中',
+    1: '现场调试',
+    2: '远程调试',
+    3: '固件升级中',
+    4: '作业中',
+    5: '待标定'
+};
+
 function safeParseJson(text) {
     try {
         return JSON.parse(text);
@@ -113,6 +123,7 @@ function extractDataHighlights(data) {
     if (!data || typeof data !== 'object') return [];
     const priority = [
         'result', 'method', 'output', 'status', 'status_reason', 'progress',
+        'mode_code',
         ...DEBUG_STATE_KEYS,
         'job_number', 'temperature', 'working_voltage', 'electric_supply_voltage',
         'cover_state', 'drone_in_dock', 'drone_charge_state', 'alarm_state',
@@ -126,6 +137,24 @@ function extractDataHighlights(data) {
         if (out.length >= 6) break;
     }
     return out;
+}
+
+function findModeCode(input, seen = new Set()) {
+    if (!input || typeof input !== 'object' || seen.has(input)) return null;
+    seen.add(input);
+    for (const [key, value] of Object.entries(input)) {
+        if (key === 'mode_code') {
+            if (typeof value === 'number') return value;
+            if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+                return Number(value);
+            }
+        }
+        if (value && typeof value === 'object') {
+            const nested = findModeCode(value, seen);
+            if (nested != null) return nested;
+        }
+    }
+    return null;
 }
 
 function inferDroneSn(body, topicSn) {
@@ -176,6 +205,14 @@ function findDebugStateField(input, seen = new Set()) {
 }
 
 function inferDebugState(body) {
+    const modeCode = findModeCode(body);
+    if (modeCode != null) {
+        return {
+            state: modeCode === 2 ? 'enabled' : 'disabled',
+            source: 'mode_code',
+            modeCode
+        };
+    }
     const fromField = findDebugStateField(body);
     if (fromField) return fromField;
     if (body.method === 'debug_mode_open') return { state: 'enabled', source: 'method' };
@@ -218,7 +255,8 @@ function inferMessageMeta(namespace, topicSn, suffix, body) {
         bid: typeof body.bid === 'string' ? body.bid : undefined,
         isReply,
         debugState: debugInfo?.state,
-        debugStateSource: debugInfo?.source
+        debugStateSource: debugInfo?.source,
+        modeCode: debugInfo?.modeCode
     };
 }
 
@@ -312,6 +350,12 @@ module.exports = {
             highlights.push({
                 label: 'debug',
                 value: meta.debugState === 'enabled' ? 'enabled' : 'disabled'
+            });
+        }
+        if (typeof meta.modeCode === 'number') {
+            highlights.push({
+                label: '机场状态',
+                value: `${meta.modeCode} ${MODE_CODE_LABEL[meta.modeCode] || ''}`.trim()
             });
         }
         highlights.push(...extractDataHighlights(body.data));
