@@ -25,6 +25,21 @@ import {
 
 const OSS_STORAGE_KEY = 'mm.plugin.dji.oss-profiles.v1';
 
+function storageLike(): Pick<Storage, 'getItem' | 'setItem'> | null {
+  try {
+    if (window.parent && window.parent !== window && window.parent.localStorage) {
+      return window.parent.localStorage;
+    }
+  } catch {
+    // Ignore cross-frame/localStorage errors.
+  }
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 export function useCloudPanel() {
   const host = window.MqttMountainHost || {};
   const bridge = host.bridge;
@@ -60,6 +75,7 @@ export function useCloudPanel() {
   });
 
   let profileFormSyncing = false;
+  let profilesReady = false;
   let refreshTimer: number | null = null;
 
   function setFeedback(text: string, tone: 'info' | 'error' = 'info'): void {
@@ -68,8 +84,9 @@ export function useCloudPanel() {
   }
 
   function loadOssProfiles(): void {
+    const storage = storageLike();
     try {
-      const raw = JSON.parse(localStorage.getItem(OSS_STORAGE_KEY) || '{}');
+      const raw = JSON.parse(storage?.getItem(OSS_STORAGE_KEY) || '{}');
       const profiles = Array.isArray(raw.profiles) && raw.profiles.length ? raw.profiles as OssProfile[] : [emptyOssProfile()];
       ossProfiles.value = profiles;
       activeOssProfileId.value = raw.activeOssProfileId || profiles[0].id;
@@ -77,10 +94,13 @@ export function useCloudPanel() {
       ossProfiles.value = [emptyOssProfile()];
       activeOssProfileId.value = ossProfiles.value[0].id;
     }
+    profilesReady = true;
   }
 
   function saveOssProfiles(): void {
-    localStorage.setItem(OSS_STORAGE_KEY, JSON.stringify({
+    if (!profilesReady) return;
+    const storage = storageLike();
+    storage?.setItem(OSS_STORAGE_KEY, JSON.stringify({
       activeOssProfileId: activeOssProfileId.value,
       profiles: ossProfiles.value
     }));
@@ -106,9 +126,10 @@ export function useCloudPanel() {
   }
 
   watch(activeOssProfileId, () => {
+    if (!profilesReady) return;
     loadActiveProfileIntoForm();
     saveOssProfiles();
-  }, { immediate: true });
+  });
 
   watch(ossForm, () => {
     if (profileFormSyncing) return;
@@ -558,11 +579,6 @@ export function useCloudPanel() {
     const reply = await waitForReply('fileupload_list', sent.ids, sent.time, 30000);
     logEntries.value = flattenLogEntries(parseRowBody(reply));
     selectedLogKeys.value = {};
-    const range = logTimeRange(logEntries.value);
-    if (range) {
-      logStartTime.value = formatDateInput(range.min);
-      logEndTime.value = formatDateInput(range.max);
-    }
     setFeedback(`已获取 ${logEntries.value.length} 条可上传日志`);
   }
 
@@ -603,14 +619,15 @@ export function useCloudPanel() {
       module: String(items[0].module),
       list: items.map((item) => ({ boot_index: item.bootIndex }))
     }));
-    const credentials: Record<string, string | number> = {
+    const credentials: Record<string, string | number | null> = {
       access_key_id: profile.access_key_id,
-      access_key_secret: profile.access_key_secret
+      access_key_secret: profile.access_key_secret,
+      expire: null,
+      security_token: ''
     };
     const expireValue = String(profile.expire || '').trim();
     if (expireValue) credentials.expire = Number(expireValue);
-    const securityToken = String(profile.security_token || '').trim();
-    if (securityToken) credentials.security_token = securityToken;
+    credentials.security_token = String(profile.security_token || '');
 
     const payload = {
       bucket: profile.bucket,
@@ -638,8 +655,8 @@ export function useCloudPanel() {
   onMounted(() => {
     loadOssProfiles();
     loadActiveProfileIntoForm();
-    logStartTime.value = formatDateInput(Date.now() - 24 * 60 * 60 * 1000);
-    logEndTime.value = formatDateInput(Date.now());
+    if (!logStartTime.value) logStartTime.value = formatDateInput(Date.now() - 24 * 60 * 60 * 1000);
+    if (!logEndTime.value) logEndTime.value = formatDateInput(Date.now());
     refreshSnapshot();
     refreshTimer = window.setInterval(refreshSnapshot, 1200);
   });
