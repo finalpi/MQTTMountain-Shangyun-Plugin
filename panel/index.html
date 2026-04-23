@@ -109,10 +109,52 @@
     }
     .empty { color: var(--muted); padding: 24px; text-align: center; }
     .stack { display: flex; flex-direction: column; gap: 12px; }
+    .workspace {
+      display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 14px;
+    }
+    .subgrid {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
+    }
+    .subgrid.single { grid-template-columns: 1fr; }
+    .field-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .checkline {
+      display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; min-height: 40px;
+      border-radius: 12px; border: 1px solid var(--line); background: rgba(15,23,42,0.72); color: var(--text);
+    }
+    .checkline input { accent-color: var(--accent); }
+    .tiny {
+      min-height: 34px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line);
+      background: rgba(15,23,42,0.72); color: var(--text);
+    }
+    .tiny.ghost { background: transparent; }
+    .stat-line { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+    .log-list, .progress-list { display: flex; flex-direction: column; gap: 10px; }
+    .log-item {
+      border: 1px solid var(--line); border-radius: 14px; background: var(--panel-soft);
+      padding: 12px; display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: start;
+    }
+    .log-item.active { border-color: rgba(56,189,248,0.42); }
+    .log-item input { margin-top: 4px; accent-color: var(--accent); }
+    .log-title { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .log-meta { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 12px; margin-top: 6px; }
+    .progress-item {
+      border: 1px solid var(--line); border-radius: 14px; background: var(--panel-soft);
+      padding: 12px;
+    }
+    .progress-bar {
+      width: 100%; height: 10px; border-radius: 999px; overflow: hidden;
+      background: rgba(15,23,42,0.7); border: 1px solid var(--line); margin-top: 10px;
+    }
+    .progress-fill {
+      height: 100%; background: linear-gradient(90deg, #38bdf8, #34d399);
+    }
+    .secret { font-family: Consolas, "JetBrains Mono", monospace; }
     @media (max-width: 980px) {
       body { padding: 12px; }
       .toolbar { grid-template-columns: 1fr; }
       .layout { grid-template-columns: 1fr; }
+      .workspace { grid-template-columns: 1fr; }
+      .subgrid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -151,6 +193,107 @@
       </div>
     </div>
 
+    <div class="workspace">
+      <section class="panel">
+        <div class="panel-head">日志查询与选择</div>
+        <div class="panel-body">
+          <div class="subgrid">
+            <label class="field">
+              <span>开始时间</span>
+              <input id="logStartTime" type="datetime-local">
+            </label>
+            <label class="field">
+              <span>结束时间</span>
+              <input id="logEndTime" type="datetime-local">
+            </label>
+          </div>
+          <div class="field">
+            <span>日志模块</span>
+            <div class="field-actions">
+              <label class="checkline"><input id="moduleDrone" type="checkbox" checked>飞行器</label>
+              <label class="checkline"><input id="moduleDock" type="checkbox" checked>机场</label>
+            </div>
+          </div>
+          <div class="field-actions">
+            <button id="queryLogsBtn" class="action-button">查询可上传日志</button>
+            <button id="selectAllLogsBtn" class="tiny">全选筛选结果</button>
+            <button id="clearLogSelectionBtn" class="tiny ghost">清空已选</button>
+          </div>
+          <div id="logStats" class="stat-line"></div>
+          <div id="logList" class="log-list"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">OSS 配置与上传进度</div>
+        <div class="panel-body">
+          <div class="subgrid">
+            <label class="field">
+              <span>配置档案</span>
+              <select id="ossProfileSelect"></select>
+            </label>
+            <label class="field">
+              <span>档案名称</span>
+              <input id="ossProfileName" type="text" placeholder="例如 默认阿里云">
+            </label>
+          </div>
+          <div class="field-actions">
+            <button id="saveOssBtn" class="tiny">保存当前配置</button>
+            <button id="newOssBtn" class="tiny">新建配置</button>
+            <button id="deleteOssBtn" class="tiny ghost">删除配置</button>
+          </div>
+          <div class="subgrid">
+            <label class="field">
+              <span>Provider</span>
+              <select id="ossProvider">
+                <option value="ali">ali</option>
+                <option value="aws">aws</option>
+                <option value="minio">minio</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Region</span>
+              <input id="ossRegion" type="text" placeholder="例如 hz">
+            </label>
+            <label class="field">
+              <span>Bucket</span>
+              <input id="ossBucket" type="text" placeholder="对象存储桶名称">
+            </label>
+            <label class="field">
+              <span>Endpoint</span>
+              <input id="ossEndpoint" type="text" placeholder="https://oss-cn-hangzhou.aliyuncs.com">
+            </label>
+            <label class="field">
+              <span>上传前缀</span>
+              <input id="ossKeyPrefix" type="text" placeholder="例如 dock-logs/prod">
+            </label>
+            <label class="field">
+              <span>Expire</span>
+              <input id="ossExpire" type="number" placeholder="毫秒时间戳">
+            </label>
+            <label class="field">
+              <span>Access Key ID</span>
+              <input id="ossAccessKeyId" class="secret" type="text">
+            </label>
+            <label class="field">
+              <span>Access Key Secret</span>
+              <input id="ossAccessKeySecret" class="secret" type="password">
+            </label>
+          </div>
+          <label class="field">
+            <span>Security Token</span>
+            <input id="ossSecurityToken" class="secret" type="text">
+          </label>
+          <div class="field-actions">
+            <button id="uploadSelectedBtn" class="action-button secondary">上传已选日志</button>
+            <button id="cancelUploadBtn" class="tiny ghost">取消上传</button>
+          </div>
+          <div id="uploadSummary" class="stat-line"></div>
+          <div id="progressList" class="progress-list"></div>
+        </div>
+      </section>
+    </div>
+
     <div class="layout">
       <section class="panel">
         <div class="panel-head">发送历史</div>
@@ -166,12 +309,19 @@
   <script>
     const host = window.MqttMountainHost || {};
     const bridge = host.bridge;
+    const api = host.api || {};
+    const OSS_STORAGE_KEY = 'mm.plugin.dji.oss-profiles.v1';
     const state = {
       airport: 'all',
       drone: 'all',
       selectedHistoryKey: null,
       snapshot: null,
-      actionBusy: false
+      actionBusy: false,
+      logEntries: [],
+      selectedLogKeys: {},
+      ossProfiles: [],
+      activeOssProfileId: '',
+      uploadRequest: null
     };
 
     const airportSelect = document.getElementById('airportSelect');
@@ -185,6 +335,33 @@
     const statusMeta = document.getElementById('statusMeta');
     const debugToggle = document.getElementById('debugToggle');
     const restartBootstrap = document.getElementById('restartBootstrap');
+    const logStartTime = document.getElementById('logStartTime');
+    const logEndTime = document.getElementById('logEndTime');
+    const moduleDrone = document.getElementById('moduleDrone');
+    const moduleDock = document.getElementById('moduleDock');
+    const queryLogsBtn = document.getElementById('queryLogsBtn');
+    const selectAllLogsBtn = document.getElementById('selectAllLogsBtn');
+    const clearLogSelectionBtn = document.getElementById('clearLogSelectionBtn');
+    const logStats = document.getElementById('logStats');
+    const logList = document.getElementById('logList');
+    const ossProfileSelect = document.getElementById('ossProfileSelect');
+    const ossProfileName = document.getElementById('ossProfileName');
+    const ossProvider = document.getElementById('ossProvider');
+    const ossRegion = document.getElementById('ossRegion');
+    const ossBucket = document.getElementById('ossBucket');
+    const ossEndpoint = document.getElementById('ossEndpoint');
+    const ossKeyPrefix = document.getElementById('ossKeyPrefix');
+    const ossExpire = document.getElementById('ossExpire');
+    const ossAccessKeyId = document.getElementById('ossAccessKeyId');
+    const ossAccessKeySecret = document.getElementById('ossAccessKeySecret');
+    const ossSecurityToken = document.getElementById('ossSecurityToken');
+    const saveOssBtn = document.getElementById('saveOssBtn');
+    const newOssBtn = document.getElementById('newOssBtn');
+    const deleteOssBtn = document.getElementById('deleteOssBtn');
+    const uploadSelectedBtn = document.getElementById('uploadSelectedBtn');
+    const cancelUploadBtn = document.getElementById('cancelUploadBtn');
+    const uploadSummary = document.getElementById('uploadSummary');
+    const progressList = document.getElementById('progressList');
     const historyList = document.getElementById('historyList');
     const detailPane = document.getElementById('detailPane');
     let lastRenderToken = '';
@@ -205,6 +382,121 @@
       const d = new Date(ts);
       const pad = (n) => String(n).padStart(2, '0');
       return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+    }
+
+    function toMs(ts) {
+      if (!ts) return 0;
+      return ts > 1e12 ? ts : ts * 1000;
+    }
+
+    function bytesText(size) {
+      const n = Number(size || 0);
+      if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+      if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(2)} MB`;
+      if (n >= 1024) return `${(n / 1024).toFixed(2)} KB`;
+      return `${n} B`;
+    }
+
+    function moduleLabel(moduleCode) {
+      return String(moduleCode) === '0' ? '飞行器' : String(moduleCode) === '3' ? '机场' : `模块 ${moduleCode}`;
+    }
+
+    function formatDateInput(ms) {
+      if (!ms) return '';
+      const d = new Date(ms);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function parseDateInput(value, fallback) {
+      if (!value) return fallback;
+      const ms = new Date(value).getTime();
+      return Number.isFinite(ms) ? ms : fallback;
+    }
+
+    function createProfileId() {
+      return crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    }
+
+    function emptyOssProfile(name) {
+      return {
+        id: createProfileId(),
+        name: name || '默认配置',
+        provider: 'ali',
+        region: '',
+        bucket: '',
+        endpoint: '',
+        keyPrefix: '',
+        expire: '',
+        access_key_id: '',
+        access_key_secret: '',
+        security_token: ''
+      };
+    }
+
+    function loadOssProfiles() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(OSS_STORAGE_KEY) || '{}');
+        const profiles = Array.isArray(raw.profiles) && raw.profiles.length ? raw.profiles : [emptyOssProfile('默认配置')];
+        state.ossProfiles = profiles;
+        state.activeOssProfileId = raw.activeOssProfileId || profiles[0].id;
+      } catch {
+        state.ossProfiles = [emptyOssProfile('默认配置')];
+        state.activeOssProfileId = state.ossProfiles[0].id;
+      }
+    }
+
+    function saveOssProfiles() {
+      localStorage.setItem(OSS_STORAGE_KEY, JSON.stringify({
+        activeOssProfileId: state.activeOssProfileId,
+        profiles: state.ossProfiles
+      }));
+    }
+
+    function activeOssProfile() {
+      return state.ossProfiles.find((item) => item.id === state.activeOssProfileId) || state.ossProfiles[0] || null;
+    }
+
+    function fillOssForm(profile) {
+      const current = profile || emptyOssProfile();
+      ossProfileName.value = current.name || '';
+      ossProvider.value = current.provider || 'ali';
+      ossRegion.value = current.region || '';
+      ossBucket.value = current.bucket || '';
+      ossEndpoint.value = current.endpoint || '';
+      ossKeyPrefix.value = current.keyPrefix || '';
+      ossExpire.value = current.expire || '';
+      ossAccessKeyId.value = current.access_key_id || '';
+      ossAccessKeySecret.value = current.access_key_secret || '';
+      ossSecurityToken.value = current.security_token || '';
+    }
+
+    function syncOssProfileFromForm() {
+      const profile = activeOssProfile();
+      if (!profile) return null;
+      profile.name = ossProfileName.value.trim() || profile.name || '未命名配置';
+      profile.provider = ossProvider.value;
+      profile.region = ossRegion.value.trim();
+      profile.bucket = ossBucket.value.trim();
+      profile.endpoint = ossEndpoint.value.trim();
+      profile.keyPrefix = ossKeyPrefix.value.trim();
+      profile.expire = ossExpire.value.trim();
+      profile.access_key_id = ossAccessKeyId.value.trim();
+      profile.access_key_secret = ossAccessKeySecret.value.trim();
+      profile.security_token = ossSecurityToken.value.trim();
+      return profile;
+    }
+
+    function renderOssProfiles() {
+      if (!state.ossProfiles.length) {
+        state.ossProfiles = [emptyOssProfile('默认配置')];
+        state.activeOssProfileId = state.ossProfiles[0].id;
+      }
+      ossProfileSelect.innerHTML = state.ossProfiles.map((item) =>
+        `<option value="${item.id}">${item.name || '未命名配置'}</option>`
+      ).join('');
+      ossProfileSelect.value = state.activeOssProfileId;
+      fillOssForm(activeOssProfile());
     }
 
     function historyKey(item) {
@@ -239,6 +531,91 @@
         seq: typeof parsed.seq === 'number' ? parsed.seq : undefined,
         method: typeof parsed.method === 'string' ? parsed.method : undefined
       };
+    }
+
+    function logEntryKey(entry) {
+      return `${entry.module}:${entry.deviceSn}:${entry.bootIndex}`;
+    }
+
+    function selectedModules() {
+      const modules = [];
+      if (moduleDrone.checked) modules.push('0');
+      if (moduleDock.checked) modules.push('3');
+      return modules;
+    }
+
+    function flattenLogEntries(body) {
+      const files = body && body.data && Array.isArray(body.data.files) ? body.data.files : [];
+      const out = [];
+      files.forEach((group) => {
+        const moduleCode = String(group.module ?? '');
+        const deviceSn = String(group.device_sn || '');
+        const list = Array.isArray(group.list) ? group.list : [];
+        list.forEach((item) => {
+          out.push({
+            module: moduleCode,
+            deviceSn,
+            bootIndex: Number(item.boot_index),
+            startTime: toMs(Number(item.start_time || 0)),
+            endTime: toMs(Number(item.end_time || item.end_ime || 0)),
+            size: Number(item.size || 0),
+            result: Number(group.result || 0)
+          });
+        });
+      });
+      return out.sort((a, b) => b.startTime - a.startTime);
+    }
+
+    function filteredLogEntries() {
+      const start = parseDateInput(logStartTime.value, 0);
+      const end = parseDateInput(logEndTime.value, Number.MAX_SAFE_INTEGER);
+      const modules = new Set(selectedModules());
+      return state.logEntries.filter((item) => {
+        if (modules.size && !modules.has(String(item.module))) return false;
+        if (start && item.endTime < start) return false;
+        if (end && item.startTime > end) return false;
+        if (state.drone !== 'all' && item.deviceSn !== state.drone) return false;
+        return true;
+      });
+    }
+
+    function currentUploadProgress(snapshot) {
+      const messages = (snapshot && snapshot.messages ? snapshot.messages : []).slice().reverse();
+      const latest = new Map();
+      for (const row of messages) {
+        const meta = cloudMeta(row);
+        if (!meta || meta.method !== 'fileupload_progress') continue;
+        if (state.airport !== 'all' && meta.airportSn !== state.airport) continue;
+        const body = parseRowBody(row);
+        const files = body && body.data && body.data.output && body.data.output.ext && Array.isArray(body.data.output.ext.files)
+          ? body.data.output.ext.files
+          : [];
+        files.forEach((file) => {
+          const key = String(file.key || `${file.module}:${file.device_sn}`);
+          if (latest.has(key)) return;
+          latest.set(key, {
+            key: String(file.key || ''),
+            module: String(file.module || ''),
+            deviceSn: String(file.device_sn || ''),
+            size: Number(file.size || 0),
+            fingerprint: String(file.fingerprint || ''),
+            progress: Number(file.progress && file.progress.progress || 0),
+            uploadRate: Number(file.progress && file.progress.upload_rate || 0),
+            finishTime: Number(file.progress && file.progress.finish_time || 0),
+            status: String(file.progress && file.progress.status || ''),
+            result: Number(file.progress && file.progress.result || 0),
+            time: row.time
+          });
+        });
+      }
+      return [...latest.values()];
+    }
+
+    function buildObjectKey(profile, entry, groupedEntries) {
+      const prefix = profile.keyPrefix ? profile.keyPrefix.replace(/\/+$/g, '') : `dock-logs/${state.airport}`;
+      const rangeStart = timeText(groupedEntries[groupedEntries.length - 1].startTime).replace(/[:\s]/g, '-');
+      const rangeEnd = timeText(groupedEntries[0].endTime).replace(/[:\s]/g, '-');
+      return `${prefix}/${entry.deviceSn || state.airport}/module-${entry.module}-${rangeStart}-${rangeEnd}.log`;
     }
 
     function parseRowBody(row) {
@@ -327,6 +704,70 @@
       return { topic, payload, time: result.time || time, ids };
     }
 
+    async function queryDeviceLogs() {
+      if (state.airport === 'all') throw new Error('请先选择机场');
+      const modules = selectedModules();
+      if (!modules.length) throw new Error('至少选择一个日志模块');
+      const sent = await publishService('fileupload_list', state.airport, { module_list: modules });
+      const reply = await waitForServiceAck('fileupload_list', sent.ids, sent.time, 30000);
+      state.logEntries = flattenLogEntries(parseRowBody(reply));
+      state.selectedLogKeys = {};
+    }
+
+    async function startFileUpload() {
+      if (state.airport === 'all') throw new Error('请先选择机场');
+      const selected = state.logEntries.filter((item) => state.selectedLogKeys[logEntryKey(item)]);
+      if (!selected.length) throw new Error('请先选择要上传的日志');
+      const profile = syncOssProfileFromForm();
+      if (!profile) throw new Error('OSS 配置不可用');
+      const required = ['bucket', 'region', 'endpoint', 'access_key_id', 'access_key_secret', 'expire'];
+      for (const key of required) {
+        if (!String(profile[key] || '').trim()) throw new Error(`缺少 OSS 字段: ${key}`);
+      }
+
+      const byModule = new Map();
+      selected.forEach((item) => {
+        const key = `${item.module}:${item.deviceSn}`;
+        if (!byModule.has(key)) byModule.set(key, []);
+        byModule.get(key).push(item);
+      });
+      const files = [...byModule.values()].map((items) => ({
+        object_key: buildObjectKey(profile, items[0], items),
+        module: String(items[0].module),
+        list: items.map((item) => ({ boot_index: item.bootIndex }))
+      }));
+
+      const payload = {
+        bucket: profile.bucket,
+        region: profile.region,
+        endpoint: profile.endpoint,
+        provider: profile.provider,
+        credentials: {
+          access_key_id: profile.access_key_id,
+          access_key_secret: profile.access_key_secret,
+          expire: Number(profile.expire),
+          security_token: profile.security_token
+        },
+        params: { files }
+      };
+
+      const sent = await publishService('fileupload_start', state.airport, payload);
+      await waitForServiceAck('fileupload_start', sent.ids, sent.time, 30000);
+      state.uploadRequest = { time: sent.time, modules: [...new Set(selected.map((item) => String(item.module)))] };
+    }
+
+    async function cancelFileUpload() {
+      if (state.airport === 'all') throw new Error('请先选择机场');
+      const progressRows = currentUploadProgress(getSnapshot());
+      const moduleList = [...new Set(progressRows.map((item) => String(item.module)).filter(Boolean))];
+      if (!moduleList.length) throw new Error('当前没有可取消的上传任务');
+      const sent = await publishService('fileupload_update', state.airport, {
+        status: 'cancel',
+        module_list: moduleList
+      });
+      await waitForServiceAck('fileupload_update', sent.ids, sent.time, 30000);
+    }
+
     function getSnapshot() {
       return bridge && typeof bridge.getSnapshot === 'function' ? bridge.getSnapshot() : null;
     }
@@ -344,7 +785,10 @@
         airport: state.airport,
         drone: state.drone,
         selectedHistoryKey: state.selectedHistoryKey,
-        actionBusy: state.actionBusy
+        actionBusy: state.actionBusy,
+        logCount: state.logEntries.length,
+        selectedLogs: Object.keys(state.selectedLogKeys).filter((key) => state.selectedLogKeys[key]).length,
+        activeOssProfileId: state.activeOssProfileId
       });
     }
 
@@ -574,6 +1018,71 @@
       `;
     }
 
+    function renderLogWorkbench(model) {
+      const rows = filteredLogEntries();
+      const selectedCount = rows.filter((item) => state.selectedLogKeys[logEntryKey(item)]).length;
+      const totalBytes = rows.reduce((sum, item) => sum + item.size, 0);
+      logStats.innerHTML = [
+        `<span>查询结果 ${rows.length} 条</span>`,
+        `<span>已选 ${selectedCount} 条</span>`,
+        `<span>总大小 ${bytesText(totalBytes)}</span>`
+      ].join('');
+
+      if (!rows.length) {
+        logList.innerHTML = '<div class="empty">先点击“查询可上传日志”，或者调整时间范围后再筛选。</div>';
+      } else {
+        logList.innerHTML = rows.map((item) => {
+          const key = logEntryKey(item);
+          return `
+            <label class="log-item ${state.selectedLogKeys[key] ? 'active' : ''}" data-key="${key}">
+              <input type="checkbox" data-log-check="${key}" ${state.selectedLogKeys[key] ? 'checked' : ''}>
+              <div>
+                <div class="log-title">
+                  <span class="method">${moduleLabel(item.module)}</span>
+                  <span class="pill">${item.deviceSn || '-'}</span>
+                  <span class="pill">boot ${item.bootIndex}</span>
+                  <span class="pill">${bytesText(item.size)}</span>
+                </div>
+                <div class="log-meta">
+                  <span>开始 ${timeText(item.startTime)}</span>
+                  <span>结束 ${timeText(item.endTime)}</span>
+                  <span>result ${item.result}</span>
+                </div>
+              </div>
+            </label>`;
+        }).join('');
+      }
+
+      const progressRows = currentUploadProgress(model.snapshot);
+      const selectedProfile = activeOssProfile();
+      uploadSummary.innerHTML = [
+        `<span>配置 ${selectedProfile ? (selectedProfile.name || '未命名配置') : '未选择'}</span>`,
+        `<span>进度项 ${progressRows.length} 条</span>`,
+        state.uploadRequest ? `<span>最近上传 ${timeText(state.uploadRequest.time)}</span>` : '<span>最近上传 暂无</span>'
+      ].join('');
+
+      if (!progressRows.length) {
+        progressList.innerHTML = '<div class="empty">暂无上传进度。发起上传后，这里会自动展示 fileupload_progress。</div>';
+      } else {
+        progressList.innerHTML = progressRows.map((item) => `
+          <article class="progress-item">
+            <div class="row">
+              <span class="method">${item.key || item.deviceSn}</span>
+              <span class="pill">${moduleLabel(item.module)}</span>
+              <span class="time">${item.status || 'unknown'}</span>
+            </div>
+            <div class="row mini">
+              <span>${item.deviceSn || '-'}</span>
+              <span>${bytesText(item.size)}</span>
+              <span>${item.uploadRate ? `${item.uploadRate} B/s` : '速率未知'}</span>
+              <span>${item.finishTime ? `完成 ${timeText(item.finishTime)}` : '未完成'}</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" style="width:${Math.max(0, Math.min(100, item.progress))}%"></div></div>
+          </article>
+        `).join('');
+      }
+    }
+
     function renderTop(model) {
       const snapshot = model.snapshot;
       const currentConn = (snapshot.connections || []).find((item) => item.id === snapshot.selectedConnectionId);
@@ -595,6 +1104,9 @@
       debugToggle.disabled = state.actionBusy || !(snapshot.selectedConnectionId && snapshot.selectedConnectionState === 'connected' && state.airport !== 'all');
       restartBootstrap.disabled = state.actionBusy || !(snapshot.selectedConnectionId && snapshot.selectedConnectionState === 'connected' && state.airport !== 'all');
       restartBootstrap.textContent = state.actionBusy ? '执行中...' : '重启注册上线';
+      queryLogsBtn.disabled = state.actionBusy || !(snapshot.selectedConnectionId && snapshot.selectedConnectionState === 'connected' && state.airport !== 'all');
+      uploadSelectedBtn.disabled = state.actionBusy || !(snapshot.selectedConnectionId && snapshot.selectedConnectionState === 'connected' && state.airport !== 'all');
+      cancelUploadBtn.disabled = state.actionBusy || !(snapshot.selectedConnectionId && snapshot.selectedConnectionState === 'connected' && state.airport !== 'all');
     }
 
     function render() {
@@ -621,6 +1133,7 @@
 
       const rerendered = buildModel(snapshot);
       renderTop(rerendered);
+      renderLogWorkbench(rerendered);
       renderHistory(rerendered);
       renderDetail(rerendered);
     }
@@ -691,6 +1204,134 @@
       }
     });
 
+    [logStartTime, logEndTime, moduleDrone, moduleDock].forEach((el) => {
+      el.addEventListener('change', () => {
+        lastRenderToken = '';
+        render();
+      });
+    });
+
+    queryLogsBtn.addEventListener('click', async () => {
+      state.actionBusy = true;
+      lastRenderToken = '';
+      render();
+      try {
+        await queryDeviceLogs();
+      } catch (error) {
+        console.error(error);
+      } finally {
+        state.actionBusy = false;
+        lastRenderToken = '';
+        render();
+      }
+    });
+
+    selectAllLogsBtn.addEventListener('click', () => {
+      filteredLogEntries().forEach((item) => {
+        state.selectedLogKeys[logEntryKey(item)] = true;
+      });
+      lastRenderToken = '';
+      render();
+    });
+
+    clearLogSelectionBtn.addEventListener('click', () => {
+      state.selectedLogKeys = {};
+      lastRenderToken = '';
+      render();
+    });
+
+    logList.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!target || target.nodeType !== 1) return;
+      const key = target.getAttribute('data-log-check');
+      if (!key) return;
+      state.selectedLogKeys[key] = !!target.checked;
+      lastRenderToken = '';
+      render();
+    });
+
+    ossProfileSelect.addEventListener('change', () => {
+      syncOssProfileFromForm();
+      state.activeOssProfileId = ossProfileSelect.value;
+      saveOssProfiles();
+      renderOssProfiles();
+      lastRenderToken = '';
+      render();
+    });
+
+    [ossProfileName, ossProvider, ossRegion, ossBucket, ossEndpoint, ossKeyPrefix, ossExpire, ossAccessKeyId, ossAccessKeySecret, ossSecurityToken]
+      .forEach((el) => {
+        el.addEventListener('input', () => {
+          syncOssProfileFromForm();
+          saveOssProfiles();
+          lastRenderToken = '';
+          render();
+        });
+      });
+
+    saveOssBtn.addEventListener('click', () => {
+      const profile = syncOssProfileFromForm();
+      if (!profile) return;
+      saveOssProfiles();
+      renderOssProfiles();
+      lastRenderToken = '';
+      render();
+    });
+
+    newOssBtn.addEventListener('click', () => {
+      const profile = emptyOssProfile('新配置');
+      state.ossProfiles.unshift(profile);
+      state.activeOssProfileId = profile.id;
+      saveOssProfiles();
+      renderOssProfiles();
+      lastRenderToken = '';
+      render();
+    });
+
+    deleteOssBtn.addEventListener('click', () => {
+      if (state.ossProfiles.length <= 1) return;
+      state.ossProfiles = state.ossProfiles.filter((item) => item.id !== state.activeOssProfileId);
+      state.activeOssProfileId = state.ossProfiles[0].id;
+      saveOssProfiles();
+      renderOssProfiles();
+      lastRenderToken = '';
+      render();
+    });
+
+    uploadSelectedBtn.addEventListener('click', async () => {
+      state.actionBusy = true;
+      lastRenderToken = '';
+      render();
+      try {
+        await startFileUpload();
+      } catch (error) {
+        console.error(error);
+      } finally {
+        state.actionBusy = false;
+        lastRenderToken = '';
+        render();
+      }
+    });
+
+    cancelUploadBtn.addEventListener('click', async () => {
+      state.actionBusy = true;
+      lastRenderToken = '';
+      render();
+      try {
+        await cancelFileUpload();
+      } catch (error) {
+        console.error(error);
+      } finally {
+        state.actionBusy = false;
+        lastRenderToken = '';
+        render();
+      }
+    });
+
+    loadOssProfiles();
+    renderOssProfiles();
+    logStartTime.value = formatDateInput(Date.now() - 24 * 60 * 60 * 1000);
+    logEndTime.value = formatDateInput(Date.now());
     render();
     setInterval(render, 1200);
   </script>
