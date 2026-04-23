@@ -239,10 +239,16 @@ module.exports = {
         const dataHl = extractDataHighlights(body.data);
         highlights.push(...dataHl);
 
+        // 把 SN / gateway 登记到宿主的「参数记忆」，下次发送时下拉就有
+        const rememberParams = {};
+        if (sn) rememberParams.sn = sn;
+        if (body.gateway && typeof body.gateway === 'string') rememberParams.gateway = body.gateway;
+
         return {
             summary: parts.join(' · ') + ` · ${sn}`,
             highlights,
             topicLabel: `${icon} ${suffixLabel}`,
+            rememberParams,
             tree: body
         };
     }
