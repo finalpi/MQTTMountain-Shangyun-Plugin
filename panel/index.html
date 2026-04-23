@@ -38,6 +38,9 @@
       padding: 7px 12px; border-radius: 999px;
       background: rgba(15,23,42,0.78); border: 1px solid var(--line); color: var(--muted);
     }
+    .badge.online { color: var(--good); border-color: rgba(52,211,153,0.28); background: rgba(52,211,153,0.12); }
+    .badge.offline { color: var(--bad); border-color: rgba(248,113,113,0.26); background: rgba(248,113,113,0.1); }
+    .badge.unknown { color: var(--warn); border-color: rgba(251,191,36,0.26); background: rgba(251,191,36,0.1); }
     .status-pill.enabled { color: var(--good); border-color: rgba(52,211,153,0.28); background: rgba(52,211,153,0.12); }
     .status-pill.disabled { color: var(--bad); border-color: rgba(248,113,113,0.26); background: rgba(248,113,113,0.1); }
     .toolbar {
@@ -111,6 +114,8 @@
     <div class="topbar">
       <div id="connectionBadge" class="badge">连接未选择</div>
       <div id="debugPill" class="status-pill">Debug 未识别</div>
+      <div id="airportOnlineBadge" class="badge unknown">机场状态未识别</div>
+      <div id="droneOnlineBadge" class="badge unknown">无人机状态未识别</div>
       <div id="statsBadge" class="badge">0 条发送 / 0 条回调</div>
     </div>
 
@@ -164,6 +169,8 @@
     const droneSelect = document.getElementById('droneSelect');
     const connectionBadge = document.getElementById('connectionBadge');
     const debugPill = document.getElementById('debugPill');
+    const airportOnlineBadge = document.getElementById('airportOnlineBadge');
+    const droneOnlineBadge = document.getElementById('droneOnlineBadge');
     const statsBadge = document.getElementById('statsBadge');
     const statusValue = document.getElementById('statusValue');
     const statusMeta = document.getElementById('statusMeta');
@@ -232,6 +239,21 @@
         drone: state.drone,
         selectedHistoryKey: state.selectedHistoryKey
       });
+    }
+
+    function latestOsdStatus(messages, type, sn) {
+      if (!sn || sn === 'all') return { state: 'unknown', text: type === 'airport' ? '机场未选择' : '无人机未选择', time: 0 };
+      const now = Date.now();
+      const recent = messages.find((row) => {
+        const meta = cloudMeta(row);
+        if (!meta || meta.topicKind !== 'osd') return false;
+        if (type === 'airport') return meta.airportSn === sn;
+        return meta.droneSn === sn;
+      });
+      if (!recent) return { state: 'offline', text: `${sn} 无 OSD`, time: 0 };
+      const age = now - recent.time;
+      if (age <= 30_000) return { state: 'online', text: `${sn} 在线`, time: recent.time };
+      return { state: 'offline', text: `${sn} 离线`, time: recent.time };
     }
 
     function renderSelect(selectEl, values, current, allLabel) {
@@ -313,7 +335,9 @@
         selectedEntry,
         relatedRows,
         callbackRows,
-        debugStatus
+        debugStatus,
+        airportOnline: latestOsdStatus(messages, 'airport', state.airport),
+        droneOnline: latestOsdStatus(messages, 'drone', state.drone)
       };
     }
 
@@ -422,6 +446,10 @@
 
       debugPill.className = 'status-pill ' + (model.debugStatus.state === 'enabled' ? 'enabled' : model.debugStatus.state === 'disabled' ? 'disabled' : '');
       debugPill.textContent = 'Debug ' + (model.debugStatus.state === 'enabled' ? '已开启' : model.debugStatus.state === 'disabled' ? '已关闭' : '未识别');
+      airportOnlineBadge.className = 'badge ' + model.airportOnline.state;
+      airportOnlineBadge.textContent = `机场 ${model.airportOnline.text}${model.airportOnline.time ? ' / ' + shortTime(model.airportOnline.time) : ''}`;
+      droneOnlineBadge.className = 'badge ' + model.droneOnline.state;
+      droneOnlineBadge.textContent = `无人机 ${model.droneOnline.text}${model.droneOnline.time ? ' / ' + shortTime(model.droneOnline.time) : ''}`;
       statsBadge.textContent = `${model.filteredHistory.length} 条发送 / ${model.callbackRows.length} 条回调`;
 
       debugToggle.textContent = model.debugStatus.state === 'enabled' ? '关闭 Debug' : '开启 Debug';

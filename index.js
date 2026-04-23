@@ -284,12 +284,51 @@ function createDebugSender(id, name, method) {
     };
 }
 
+function createCommandSender({ id, name, method, group = '快捷控制', target = 'airport' }) {
+    const uuid = crypto.randomUUID();
+    const now = Date.now();
+    const params = [
+        { key: 'sn', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' }
+    ];
+    if (target === 'drone') {
+        params.push({ key: 'drone_sn', label: '无人机 SN', required: true, placeholder: '例如 4DAXXXX' });
+    }
+    params.push(
+        { key: 'tid', label: 'tid', default: uuid },
+        { key: 'bid', label: 'bid', default: uuid },
+        { key: 'ts', label: 'timestamp (ms)', type: 'number', default: now }
+    );
+
+    const payload = {
+        tid: '{tid}',
+        bid: '{bid}',
+        timestamp: '{ts}__NUM__',
+        method
+    };
+    if (target === 'drone') payload.data = { drone_sn: '{drone_sn}' };
+
+    return {
+        id,
+        name,
+        group,
+        topic: 'thing/product/{sn}/services',
+        payloadTemplate: JSON.stringify(payload).replace('"{ts}__NUM__"', '{ts}'),
+        qos: 1,
+        params
+    };
+}
+
 module.exports = {
     activate(ctx) {
         ctx.log('DJI 上云插件已激活');
     },
 
     senders: () => ([
+        createCommandSender({ id: 'control.drone.power_on', name: '飞行器开机', method: 'debug_drone_open', target: 'drone' }),
+        createCommandSender({ id: 'control.dock.reboot', name: '机场重启', method: 'device_reboot' }),
+        createCommandSender({ id: 'control.drone.power_off', name: '飞行器关机', method: 'debug_drone_close', target: 'drone' }),
+        createCommandSender({ id: 'control.cover.open', name: '打开舱盖', method: 'debug_cover_open' }),
+        createCommandSender({ id: 'control.cover.close', name: '关闭舱盖', method: 'debug_cover_close' }),
         createDebugSender('debug.mode.open', '开启 Debug 模式', 'debug_mode_open'),
         createDebugSender('debug.mode.close', '关闭 Debug 模式', 'debug_mode_close')
     ]),
