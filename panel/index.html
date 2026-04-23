@@ -41,7 +41,7 @@
     .status-pill.enabled { color: var(--good); border-color: rgba(52,211,153,0.28); background: rgba(52,211,153,0.12); }
     .status-pill.disabled { color: var(--bad); border-color: rgba(248,113,113,0.26); background: rgba(248,113,113,0.1); }
     .toolbar {
-      display: grid; grid-template-columns: repeat(2, minmax(180px, 240px)) 1fr;
+      display: grid; grid-template-columns: minmax(180px, 240px) minmax(180px, 240px) minmax(180px, 220px);
       gap: 12px; align-items: end;
     }
     .field { display: flex; flex-direction: column; gap: 6px; }
@@ -170,6 +170,7 @@
     const debugToggle = document.getElementById('debugToggle');
     const historyList = document.getElementById('historyList');
     const detailPane = document.getElementById('detailPane');
+    let lastRenderToken = '';
 
     function safeParse(text) {
       try { return JSON.parse(text); } catch { return null; }
@@ -215,6 +216,22 @@
 
     function getSnapshot() {
       return bridge && typeof bridge.getSnapshot === 'function' ? bridge.getSnapshot() : null;
+    }
+
+    function snapshotToken(snapshot) {
+      const lastMsg = snapshot.messages && snapshot.messages.length ? snapshot.messages[snapshot.messages.length - 1] : null;
+      const lastPub = snapshot.publishHistory && snapshot.publishHistory.length ? snapshot.publishHistory[snapshot.publishHistory.length - 1] : null;
+      return JSON.stringify({
+        connectionId: snapshot.selectedConnectionId,
+        connectionState: snapshot.selectedConnectionState,
+        messageCount: snapshot.messages ? snapshot.messages.length : 0,
+        publishCount: snapshot.publishHistory ? snapshot.publishHistory.length : 0,
+        lastMsgTime: lastMsg ? lastMsg.time : 0,
+        lastPubTime: lastPub ? lastPub.time : 0,
+        airport: state.airport,
+        drone: state.drone,
+        selectedHistoryKey: state.selectedHistoryKey
+      });
     }
 
     function renderSelect(selectEl, values, current, allLabel) {
@@ -320,12 +337,6 @@
           </div>
         </article>
       `).join('');
-      historyList.querySelectorAll('.history-item').forEach((el) => {
-        el.addEventListener('click', () => {
-          state.selectedHistoryKey = el.getAttribute('data-key');
-          render();
-        });
-      });
     }
 
     function renderDetail(model) {
@@ -420,6 +431,9 @@
     function render() {
       const snapshot = getSnapshot();
       if (!snapshot) return;
+      const token = snapshotToken(snapshot);
+      if (token === lastRenderToken) return;
+      lastRenderToken = token;
       state.snapshot = snapshot;
       const model = buildModel(snapshot);
       renderSelect(airportSelect, model.airportOptions, state.airport, '全部机场');
@@ -445,11 +459,21 @@
     airportSelect.addEventListener('change', () => {
       state.airport = airportSelect.value;
       state.drone = 'all';
+      lastRenderToken = '';
       render();
     });
 
     droneSelect.addEventListener('change', () => {
       state.drone = droneSelect.value;
+      lastRenderToken = '';
+      render();
+    });
+
+    historyList.addEventListener('click', (event) => {
+      const item = event.target && event.target.closest ? event.target.closest('.history-item') : null;
+      if (!item) return;
+      state.selectedHistoryKey = item.getAttribute('data-key');
+      lastRenderToken = '';
       render();
     });
 
@@ -477,11 +501,12 @@
           time: result.time || time
         });
       }
+      lastRenderToken = '';
       render();
     });
 
     render();
-    setInterval(render, 1000);
+    setInterval(render, 1200);
   </script>
 </body>
 </html>
