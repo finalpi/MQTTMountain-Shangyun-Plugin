@@ -13,6 +13,8 @@ const TOPIC_SUFFIX_LABEL = {
     events_reply: '事件应答',
     services: '下行指令',
     services_reply: '指令回调',
+    'drc/down': '遥控下行',
+    'drc/up': '遥控回传',
     requests: '上行请求',
     requests_reply: '请求应答',
     properties: '属性设置',
@@ -30,6 +32,8 @@ const DIR_ICON = {
     events_reply: 'EVENT',
     services: 'CALL',
     services_reply: 'ACK',
+    'drc/down': 'DRC',
+    'drc/up': 'ACK',
     requests: 'REQ',
     requests_reply: 'ACK',
     properties: 'PROP',
@@ -221,13 +225,26 @@ function inferDebugState(body) {
 }
 
 function inferMessageMeta(namespace, topicSn, suffix, body) {
-    const isReply = suffix.endsWith('_reply');
-    const gatewaySn = typeof body.gateway === 'string' ? body.gateway : undefined;
-    const airportSn = firstString(gatewaySn, topicSn);
+    const isReply = suffix.endsWith('_reply') || suffix === 'drc/up';
     const droneSn = inferDroneSn(body, topicSn);
+    const data = body && typeof body.data === 'object' ? body.data : {};
+    const gatewaySn = firstString(
+        body.gateway,
+        body.gateway_sn,
+        body.gatewaySn,
+        body.dock_sn,
+        body.dockSn,
+        data.gateway,
+        data.gateway_sn,
+        data.gatewaySn,
+        data.dock_sn,
+        data.dockSn
+    );
+    const airportSn = gatewaySn || (!droneSn ? topicSn : undefined);
 
     let messageKind = 'telemetry';
     if (suffix.includes('event')) messageKind = isReply ? 'reply' : 'event';
+    else if (suffix.startsWith('drc/')) messageKind = isReply ? 'reply' : 'request';
     else if (suffix.includes('service') || suffix.includes('request') || suffix.includes('property')) {
         messageKind = isReply ? 'reply' : 'request';
     } else if (suffix.includes('status')) messageKind = 'status';
@@ -235,6 +252,8 @@ function inferMessageMeta(namespace, topicSn, suffix, body) {
 
     let direction = 'up';
     if (suffix.startsWith('services') || suffix.startsWith('properties')) direction = 'down';
+    if (suffix === 'drc/down') direction = 'down';
+    if (suffix === 'drc/up') direction = 'up';
     if (suffix.startsWith('requests')) direction = 'up';
     if (isReply && (suffix.startsWith('services') || suffix.startsWith('properties'))) direction = 'up';
 
@@ -253,6 +272,7 @@ function inferMessageMeta(namespace, topicSn, suffix, body) {
         method: typeof body.method === 'string' ? body.method : undefined,
         tid: typeof body.tid === 'string' ? body.tid : undefined,
         bid: typeof body.bid === 'string' ? body.bid : undefined,
+        seq: typeof body.seq === 'number' ? body.seq : undefined,
         isReply,
         debugState: debugInfo?.state,
         debugStateSource: debugInfo?.source,
@@ -284,12 +304,17 @@ function createDebugSender(id, name, method) {
     };
 }
 
-function createCommandSender({ id, name, method, group = '快捷控制' }) {
+function createServiceSender({ id, name, method, group = '快捷控制', dataParams = [] }) {
     const uuid = crypto.randomUUID();
     const now = Date.now();
     const params = [
         { key: 'airportSn', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' }
     ];
+    const data = {};
+    for (const param of dataParams) {
+        params.push(param);
+        data[param.key] = `{${param.key}}`;
+    }
     params.push(
         { key: 'tid', label: 'tid', default: uuid },
         { key: 'bid', label: 'bid', default: uuid },
@@ -302,6 +327,7 @@ function createCommandSender({ id, name, method, group = '快捷控制' }) {
         timestamp: '{ts}__NUM__',
         method
     };
+    if (dataParams.length) payload.data = data;
 
     return {
         id,
@@ -314,17 +340,49 @@ function createCommandSender({ id, name, method, group = '快捷控制' }) {
     };
 }
 
+function createDrcSender({ id, name, method, group = '遥控指令' }) {
+    const now = Date.now();
+    return {
+        id,
+        name,
+        group,
+        topic: 'thing/product/{airportSn}/drc/down',
+        payloadTemplate: JSON.stringify({
+            method,
+            data: {},
+            seq: '{seq}__NUM__'
+        }).replace('"{seq}__NUM__"', '{seq}'),
+        qos: 1,
+        params: [
+            { key: 'airportSn', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' },
+            { key: 'seq', label: 'seq', type: 'number', default: now }
+        ]
+    };
+}
+
 module.exports = {
     activate(ctx) {
         ctx.log('DJI 上云插件已激活');
     },
 
     senders: () => ([
-        createCommandSender({ id: 'control.drone.power_on', name: '飞行器开机', method: 'debug_drone_open' }),
-        createCommandSender({ id: 'control.dock.reboot', name: '机场重启', method: 'device_reboot' }),
-        createCommandSender({ id: 'control.drone.power_off', name: '飞行器关机', method: 'debug_drone_close' }),
-        createCommandSender({ id: 'control.cover.open', name: '打开舱盖', method: 'debug_cover_open' }),
-        createCommandSender({ id: 'control.cover.close', name: '关闭舱盖', method: 'debug_cover_close' }),
+        createServiceSender({ id: 'control.drone.power_on', name: '飞行器开机', method: 'drone_open' }),
+        createServiceSender({ id: 'control.dock.reboot', name: '机场重启', method: 'device_reboot' }),
+        createServiceSender({ id: 'control.drone.power_off', name: '飞行器关机', method: 'drone_close' }),
+        createServiceSender({ id: 'control.cover.open', name: '打开舱盖', method: 'cover_open' }),
+        createServiceSender({ id: 'control.cover.close', name: '关闭舱盖', method: 'cover_close' }),
+        createServiceSender({
+            id: 'wayline.return_specific_home',
+            name: '一键返航',
+            method: 'return_specific_home',
+            group: '航线控制',
+            dataParams: [
+                { key: 'home_dock_sn', label: '返航目标机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' }
+            ]
+        }),
+        createDrcSender({ id: 'drc.emergency_stop', name: '急停', method: 'drone_emergency_stop' }),
+        createDrcSender({ id: 'drc.emergency_landing', name: '紧急降落', method: 'drc_emergency_landing' }),
+        createDrcSender({ id: 'drc.force_landing', name: '强制降落', method: 'drc_force_landing' }),
         createDebugSender('debug.mode.open', '开启 Debug 模式', 'debug_mode_open'),
         createDebugSender('debug.mode.close', '关闭 Debug 模式', 'debug_mode_close')
     ]),
