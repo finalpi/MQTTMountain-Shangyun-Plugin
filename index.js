@@ -50,7 +50,6 @@ const DOCK3_FIELD_LABEL = {
     poe_link_status: 'POE 连接状态',
     poe_power_output: 'POE 功率输出',
     backup_battery: '备份电池',
-    drone_battery_maintenance_info: '飞行器电池维护信息',
     deployment_mode: '部署模式',
     drone_in_dock: '机库内无人机',
     drone_charge_state: '无人机充电状态',
@@ -70,6 +69,15 @@ const DOCK3_FIELD_LABEL = {
     flighttask_step_code: '任务步骤',
     flighttask_progress: '任务进度'
 };
+
+const DEBUG_STATE_KEYS = [
+    'debug_mode',
+    'debug_mode_enable',
+    'debug_mode_enabled',
+    'debug_mode_status',
+    'is_debug_mode',
+    'debug_enabled'
+];
 
 function safeParseJson(text) {
     try {
@@ -105,6 +113,7 @@ function extractDataHighlights(data) {
     if (!data || typeof data !== 'object') return [];
     const priority = [
         'result', 'method', 'output', 'status', 'status_reason', 'progress',
+        ...DEBUG_STATE_KEYS,
         'job_number', 'temperature', 'working_voltage', 'electric_supply_voltage',
         'cover_state', 'drone_in_dock', 'drone_charge_state', 'alarm_state',
         'environment_temperature', 'environment_humidity', 'wind_speed', 'rainfall',
@@ -136,6 +145,44 @@ function inferDroneSn(body, topicSn) {
     return undefined;
 }
 
+function normalizeDebugState(value) {
+    if (typeof value === 'boolean') return value ? 'enabled' : 'disabled';
+    if (typeof value === 'number') {
+        if (value === 1) return 'enabled';
+        if (value === 0) return 'disabled';
+    }
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (['1', 'true', 'on', 'open', 'opened', 'enable', 'enabled'].includes(normalized)) return 'enabled';
+        if (['0', 'false', 'off', 'close', 'closed', 'disable', 'disabled'].includes(normalized)) return 'disabled';
+    }
+    return null;
+}
+
+function findDebugStateField(input, seen = new Set()) {
+    if (!input || typeof input !== 'object' || seen.has(input)) return null;
+    seen.add(input);
+    for (const [key, value] of Object.entries(input)) {
+        if (DEBUG_STATE_KEYS.includes(key)) {
+            const state = normalizeDebugState(value);
+            if (state) return { state, source: key };
+        }
+        if (value && typeof value === 'object') {
+            const nested = findDebugStateField(value, seen);
+            if (nested) return nested;
+        }
+    }
+    return null;
+}
+
+function inferDebugState(body) {
+    const fromField = findDebugStateField(body);
+    if (fromField) return fromField;
+    if (body.method === 'debug_mode_open') return { state: 'enabled', source: 'method' };
+    if (body.method === 'debug_mode_close') return { state: 'disabled', source: 'method' };
+    return null;
+}
+
 function inferMessageMeta(namespace, topicSn, suffix, body) {
     const isReply = suffix.endsWith('_reply');
     const gatewaySn = typeof body.gateway === 'string' ? body.gateway : undefined;
@@ -154,6 +201,8 @@ function inferMessageMeta(namespace, topicSn, suffix, body) {
     if (suffix.startsWith('requests')) direction = 'up';
     if (isReply && (suffix.startsWith('services') || suffix.startsWith('properties'))) direction = 'up';
 
+    const debugInfo = inferDebugState(body);
+
     return {
         family: 'dji-shangyun',
         namespace,
@@ -167,26 +216,25 @@ function inferMessageMeta(namespace, topicSn, suffix, body) {
         method: typeof body.method === 'string' ? body.method : undefined,
         tid: typeof body.tid === 'string' ? body.tid : undefined,
         bid: typeof body.bid === 'string' ? body.bid : undefined,
-        isReply
+        isReply,
+        debugState: debugInfo?.state,
+        debugStateSource: debugInfo?.source
     };
 }
 
-function createSender(id, name, group, action, extraData = {}) {
+function createDebugSender(id, name, method) {
     const uuid = crypto.randomUUID();
     const now = Date.now();
     return {
         id,
         name,
-        group,
+        group: '调试模式',
         topic: 'thing/product/{sn}/services',
         payloadTemplate: JSON.stringify({
             tid: '{tid}',
             bid: '{bid}',
             timestamp: '{ts}__NUM__',
-            method: action.startsWith('debug_') ? 'debug_mode_open' : action,
-            data: action.startsWith('debug_')
-                ? Object.assign({ action: action.replace(/^debug_/, '') }, extraData)
-                : extraData
+            method
         }).replace('"{ts}__NUM__"', '{ts}'),
         qos: 1,
         params: [
@@ -204,25 +252,8 @@ module.exports = {
     },
 
     senders: () => ([
-        createSender('debug.drone_open', '开启飞行器', '机场调试', 'debug_drone_open'),
-        createSender('debug.drone_close', '关闭飞行器', '机场调试', 'debug_drone_close'),
-        createSender('debug.cover_open', '打开舱盖', '机场调试', 'debug_cover_open'),
-        createSender('debug.cover_close', '关闭舱盖', '机场调试', 'debug_cover_close'),
-        createSender('debug.putter_open', '展开推杆', '机场调试', 'debug_putter_open'),
-        createSender('debug.putter_close', '收回推杆', '机场调试', 'debug_putter_close'),
-        createSender('debug.charge_open', '开启充电', '机场调试', 'debug_charge_open'),
-        createSender('debug.charge_close', '关闭充电', '机场调试', 'debug_charge_close'),
-        createSender('control.device_reboot', '机场重启', '机场控制', 'device_reboot'),
-        createSender('control.drone_reboot', '无人机重启', '机场控制', 'drone_reboot'),
-        createSender('control.dock_format', '机场格式化', '机场控制', 'dock_format'),
-        createSender('control.drone_format', '无人机格式化', '机场控制', 'drone_format'),
-        createSender('live.live_start_push', '开始直播推流', '直播', 'live_start_push', {
-            url_type: 1,
-            video_id: '',
-            video_quality: 2,
-            url: ''
-        }),
-        createSender('live.live_stop_push', '停止直播推流', '直播', 'live_stop_push')
+        createDebugSender('debug.mode.open', '开启 Debug 模式', 'debug_mode_open'),
+        createDebugSender('debug.mode.close', '关闭 Debug 模式', 'debug_mode_close')
     ]),
 
     topicLabel(topic) {
@@ -275,9 +306,16 @@ module.exports = {
         if (body.tid) highlights.push({ label: 'tid', value: String(body.tid) });
         if (body.bid) highlights.push({ label: 'bid', value: String(body.bid) });
         if (body.timestamp) highlights.push({ label: 'timestamp', value: formatTs(body.timestamp) });
-        highlights.push(...extractDataHighlights(body.data));
 
         const meta = inferMessageMeta(namespace, sn, suffix, body);
+        if (meta.debugState) {
+            highlights.push({
+                label: 'debug',
+                value: meta.debugState === 'enabled' ? 'enabled' : 'disabled'
+            });
+        }
+        highlights.push(...extractDataHighlights(body.data));
+
         const rememberParams = {};
         if (sn) rememberParams.sn = sn;
         if (meta.airportSn) rememberParams.airportSn = meta.airportSn;
