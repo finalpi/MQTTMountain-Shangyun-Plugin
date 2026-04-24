@@ -31,15 +31,15 @@ const emit = defineEmits<{
   'update:moduleDock': [value: boolean];
   'update:activeOssProfileId': [value: string];
   'update:ossField': [field: keyof OssProfile, value: string];
-  queryLogs: [];
-  selectAllLogs: [];
-  clearLogSelection: [];
-  setLogSelected: [entry: LogEntry, checked: boolean];
-  uploadSelected: [];
-  cancelUpload: [];
-  saveCurrentProfile: [];
-  createNewProfile: [];
-  deleteCurrentProfile: [];
+  'query-logs': [];
+  'select-all-logs': [];
+  'clear-log-selection': [];
+  'set-log-selected': [entry: LogEntry, checked: boolean];
+  'upload-selected': [];
+  'cancel-upload': [];
+  'save-current-profile': [];
+  'create-new-profile': [];
+  'delete-current-profile': [];
 }>();
 </script>
 
@@ -74,9 +74,9 @@ const emit = defineEmits<{
         </div>
 
         <div class="field-actions">
-          <button class="action-button" :disabled="!canOperate" @click="emit('queryLogs')">查询可上传日志</button>
-          <button class="tiny" @click="emit('selectAllLogs')">全选筛选结果</button>
-          <button class="tiny ghost" @click="emit('clearLogSelection')">清空已选</button>
+          <button class="action-button" :disabled="!canOperate" @click="emit('query-logs')">查询可上传日志</button>
+          <button class="tiny" @click="emit('select-all-logs')">全选筛选结果</button>
+          <button class="tiny ghost" @click="emit('clear-log-selection')">清空已选</button>
         </div>
 
         <div class="stat-line">
@@ -92,7 +92,7 @@ const emit = defineEmits<{
 
         <div v-else class="log-list">
           <label v-for="item in filteredLogRows" :key="logEntryKey(item)" class="log-item" :class="{ active: !!selectedLogKeys[logEntryKey(item)] }">
-            <input type="checkbox" :checked="!!selectedLogKeys[logEntryKey(item)]" @change="emit('setLogSelected', item, ($event.target as HTMLInputElement).checked)">
+            <input type="checkbox" :checked="!!selectedLogKeys[logEntryKey(item)]" @change="emit('set-log-selected', item, ($event.target as HTMLInputElement).checked)">
             <div>
               <div class="log-title">
                 <span class="method">{{ moduleLabel(item.module) }}</span>
@@ -133,9 +133,9 @@ const emit = defineEmits<{
         </div>
 
         <div class="field-actions">
-          <button class="tiny" @click="emit('saveCurrentProfile')">保存当前配置</button>
-          <button class="tiny" @click="emit('createNewProfile')">新建配置</button>
-          <button class="tiny ghost" @click="emit('deleteCurrentProfile')">删除配置</button>
+          <button class="tiny" @click="emit('save-current-profile')">保存当前配置</button>
+          <button class="tiny" @click="emit('create-new-profile')">新建配置</button>
+          <button class="tiny ghost" @click="emit('delete-current-profile')">删除配置</button>
         </div>
 
         <div class="subgrid">
@@ -179,8 +179,8 @@ const emit = defineEmits<{
         </label>
 
         <div class="field-actions">
-          <button class="action-button secondary" :disabled="!canOperate" @click="emit('uploadSelected')">上传已选日志</button>
-          <button class="tiny ghost" :disabled="!canOperate" @click="emit('cancelUpload')">取消上传</button>
+          <button class="action-button secondary" :disabled="!canOperate" @click="emit('upload-selected')">上传已选日志</button>
+          <button class="tiny ghost" :disabled="!canOperate" @click="emit('cancel-upload')">取消上传</button>
         </div>
 
         <div class="stat-line">
