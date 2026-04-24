@@ -88,7 +88,7 @@ const emit = defineEmits<{
 
     <div class="status-main">
       <div class="status-title">说明</div>
-      <div class="mini">插件页面已经拆成组件和 composable，后面继续扩展会更稳。</div>
+      <div class="mini">保存配置只会在点击“保存当前配置”后生效，切换档案不会再把所有配置一起改掉。</div>
     </div>
   </div>
 </template>

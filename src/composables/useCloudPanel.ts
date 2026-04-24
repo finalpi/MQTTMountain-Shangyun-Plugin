@@ -42,6 +42,14 @@ function storageLike(): Pick<Storage, 'getItem' | 'setItem'> | null {
   }
 }
 
+function looksLikeAirportSn(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Z0-9]{14}$/.test(value.trim());
+}
+
+function looksLikeDroneSn(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Z0-9]{18,22}$/.test(value.trim());
+}
+
 function normalizeProfile(input: Partial<OssProfile>, usedNames: string[]): OssProfile {
   const fallback = emptyOssProfile(nextProfileName(usedNames));
   const name = String(input.name || '').trim() || fallback.name;
@@ -156,11 +164,6 @@ export function useCloudPanel() {
     loadActiveProfileIntoForm();
     saveOssProfiles();
   });
-
-  watch(ossForm, () => {
-    if (profileFormSyncing) return;
-    persistFormIntoProfiles();
-  }, { deep: true });
 
   function createNewProfile(): void {
     const profile = emptyOssProfile(nextProfileName(ossProfiles.value.map((item) => item.name)));
@@ -390,45 +393,33 @@ export function useCloudPanel() {
 
   const airportOptions = computed(() => {
     const airportSet = new Set<string>();
-    const droneScores = new Map<string, number>();
-    const airportScores = new Map<string, number>();
-    const bump = (map: Map<string, number>, key?: string, step = 1) => {
-      if (!key) return;
-      map.set(key, (map.get(key) || 0) + step);
-    };
 
     publishEntries.value.forEach((entry) => {
-      if (entry.meta.airportSn) {
+      if (looksLikeAirportSn(entry.meta.airportSn)) {
         airportSet.add(entry.meta.airportSn);
-        bump(airportScores, entry.meta.airportSn, 1);
       }
-      bump(droneScores, entry.meta.droneSn, 1);
     });
 
     cloudMessages.value.forEach((row) => {
       const meta = cloudMeta(row);
       if (!meta) return;
-      if (meta.airportSn) {
+      if (looksLikeAirportSn(meta.airportSn)) {
         airportSet.add(meta.airportSn);
-        bump(airportScores, meta.airportSn, 3);
       }
-      bump(droneScores, meta.droneSn, 3);
     });
 
     [...(snapshot.value.paramSuggestions.airportSn || []), ...(snapshot.value.paramSuggestions.gateway || [])].forEach((value) => {
-      if (!value) return;
-      airportSet.add(value);
-      bump(airportScores, value, 2);
+      if (looksLikeAirportSn(value)) airportSet.add(value);
     });
 
-    return [...airportSet].filter((value) => (airportScores.get(value) || 0) >= (droneScores.get(value) || 0)).sort();
+    return [...airportSet].sort();
   });
 
   const allDroneOptions = computed(() => {
     const out = new Set<string>();
-    publishEntries.value.forEach((entry) => { if (entry.meta.droneSn) out.add(entry.meta.droneSn); });
-    cloudMessages.value.forEach((row) => { const meta = cloudMeta(row); if (meta?.droneSn) out.add(meta.droneSn); });
-    (snapshot.value.paramSuggestions.droneSn || []).forEach((value) => { if (value) out.add(value); });
+    publishEntries.value.forEach((entry) => { if (looksLikeDroneSn(entry.meta.droneSn)) out.add(entry.meta.droneSn); });
+    cloudMessages.value.forEach((row) => { const meta = cloudMeta(row); if (looksLikeDroneSn(meta?.droneSn)) out.add(meta.droneSn); });
+    (snapshot.value.paramSuggestions.droneSn || []).forEach((value) => { if (looksLikeDroneSn(value)) out.add(value); });
     return [...out].sort();
   });
 

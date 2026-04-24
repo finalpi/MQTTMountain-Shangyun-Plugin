@@ -123,6 +123,14 @@ function firstString(...values) {
     return undefined;
 }
 
+function looksLikeAirportSn(value) {
+    return typeof value === 'string' && /^[A-Z0-9]{14}$/.test(value.trim());
+}
+
+function looksLikeDroneSn(value) {
+    return typeof value === 'string' && /^[A-Z0-9]{18,22}$/.test(value.trim());
+}
+
 function extractDataHighlights(data) {
     if (!data || typeof data !== 'object') return [];
     const priority = [
@@ -174,7 +182,7 @@ function inferDroneSn(body, topicSn) {
         data.subDevice
     );
     if (droneSn) return droneSn;
-    if (typeof body.gateway === 'string' && body.gateway !== topicSn) return topicSn;
+    if (looksLikeDroneSn(topicSn)) return topicSn;
     return undefined;
 }
 
@@ -240,7 +248,10 @@ function inferMessageMeta(namespace, topicSn, suffix, body) {
         data.dock_sn,
         data.dockSn
     );
-    const airportSn = gatewaySn || (!droneSn ? topicSn : undefined);
+    const airportSn = firstString(
+        gatewaySn,
+        looksLikeAirportSn(topicSn) ? topicSn : undefined
+    );
 
     let messageKind = 'telemetry';
     if (suffix.includes('event')) messageKind = isReply ? 'reply' : 'event';
