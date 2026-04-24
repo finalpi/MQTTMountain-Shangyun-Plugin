@@ -27,6 +27,10 @@ import {
 
 const OSS_STORAGE_KEY = 'mm.plugin.dji.oss-profiles.v1';
 
+function debugProfileLog(label: string, payload: unknown): void {
+  console.log(`[cloud-panel][profiles] ${label}`, payload);
+}
+
 function storageLike(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {
     if (window.parent && window.parent !== window && window.parent.localStorage) {
@@ -136,9 +140,20 @@ export function useCloudPanel() {
       activeOssProfileId.value = profiles.some((item: OssProfile) => item.id === raw.activeOssProfileId)
         ? raw.activeOssProfileId
         : profiles[0].id;
+      debugProfileLog('load', {
+        raw,
+        count: profiles.length,
+        activeOssProfileId: activeOssProfileId.value,
+        profiles
+      });
     } catch {
       ossProfiles.value = [emptyOssProfile()];
       activeOssProfileId.value = ossProfiles.value[0].id;
+      debugProfileLog('load-fallback', {
+        count: ossProfiles.value.length,
+        activeOssProfileId: activeOssProfileId.value,
+        profiles: ossProfiles.value
+      });
     }
     profilesReady = true;
   }
@@ -146,10 +161,20 @@ export function useCloudPanel() {
   function saveOssProfiles(): void {
     if (!profilesReady) return;
     const storage = storageLike();
-    storage?.setItem(OSS_STORAGE_KEY, JSON.stringify({
+    const nextValue = JSON.stringify({
       activeOssProfileId: activeOssProfileId.value,
       profiles: ossProfiles.value
-    }));
+    });
+    debugProfileLog('save', {
+      count: ossProfiles.value.length,
+      activeOssProfileId: activeOssProfileId.value,
+      profiles: ossProfiles.value,
+      nextValue
+    });
+    storage?.setItem(OSS_STORAGE_KEY, nextValue);
+    debugProfileLog('save-after', {
+      stored: storage?.getItem(OSS_STORAGE_KEY) || null
+    });
   }
 
   const activeOssProfile = computed(() => {
@@ -183,10 +208,21 @@ export function useCloudPanel() {
   });
 
   function createNewProfile(): void {
+    debugProfileLog('create-before', {
+      count: ossProfiles.value.length,
+      activeOssProfileId: activeOssProfileId.value,
+      profiles: ossProfiles.value
+    });
     const profile = emptyOssProfile(nextProfileName(ossProfiles.value.map((item) => item.name)));
     ossProfiles.value = [profile, ...ossProfiles.value];
     activeOssProfileId.value = profile.id;
     loadActiveProfileIntoForm();
+    debugProfileLog('create-after', {
+      created: profile,
+      count: ossProfiles.value.length,
+      activeOssProfileId: activeOssProfileId.value,
+      profiles: ossProfiles.value
+    });
     saveOssProfiles();
     setFeedback(`已创建 ${profile.name}`);
   }
