@@ -127,6 +127,11 @@ const emit = defineEmits<{
           </label>
         </div>
 
+        <div class="stat-line">
+          <span>{{ `档案数量 ${ossProfiles.length}` }}</span>
+          <span>{{ `当前档案 ${ossProfiles.find((item) => item.id === activeOssProfileId)?.name || '未命名配置'}` }}</span>
+        </div>
+
         <div class="field-actions">
           <button class="tiny" @click="emit('saveCurrentProfile')">保存当前配置</button>
           <button class="tiny" @click="emit('createNewProfile')">新建配置</button>
@@ -142,12 +147,30 @@ const emit = defineEmits<{
               <option value="minio">minio</option>
             </select>
           </label>
-          <label class="field"><span>Region</span><input :value="ossForm.region" type="text" @input="emit('update:ossField', 'region', ($event.target as HTMLInputElement).value)"></label>
-          <label class="field"><span>Bucket</span><input :value="ossForm.bucket" type="text" @input="emit('update:ossField', 'bucket', ($event.target as HTMLInputElement).value)"></label>
-          <label class="field"><span>Endpoint</span><input :value="ossForm.endpoint" type="text" @input="emit('update:ossField', 'endpoint', ($event.target as HTMLInputElement).value)"></label>
-          <label class="field"><span>上传前缀</span><input :value="ossForm.keyPrefix" type="text" @input="emit('update:ossField', 'keyPrefix', ($event.target as HTMLInputElement).value)"></label>
-          <label class="field"><span>Access Key ID</span><input :value="ossForm.access_key_id" class="secret" type="text" @input="emit('update:ossField', 'access_key_id', ($event.target as HTMLInputElement).value)"></label>
-          <label class="field"><span>Access Key Secret</span><input :value="ossForm.access_key_secret" class="secret" type="password" @input="emit('update:ossField', 'access_key_secret', ($event.target as HTMLInputElement).value)"></label>
+          <label class="field">
+            <span>Region</span>
+            <input :value="ossForm.region" type="text" @input="emit('update:ossField', 'region', ($event.target as HTMLInputElement).value)">
+          </label>
+          <label class="field">
+            <span>Bucket</span>
+            <input :value="ossForm.bucket" type="text" @input="emit('update:ossField', 'bucket', ($event.target as HTMLInputElement).value)">
+          </label>
+          <label class="field">
+            <span>Endpoint</span>
+            <input :value="ossForm.endpoint" type="text" @input="emit('update:ossField', 'endpoint', ($event.target as HTMLInputElement).value)">
+          </label>
+          <label class="field">
+            <span>上传前缀</span>
+            <input :value="ossForm.keyPrefix" type="text" @input="emit('update:ossField', 'keyPrefix', ($event.target as HTMLInputElement).value)">
+          </label>
+          <label class="field">
+            <span>Access Key ID</span>
+            <input :value="ossForm.access_key_id" class="secret" type="text" @input="emit('update:ossField', 'access_key_id', ($event.target as HTMLInputElement).value)">
+          </label>
+          <label class="field">
+            <span>Access Key Secret</span>
+            <input :value="ossForm.access_key_secret" class="secret" type="password" @input="emit('update:ossField', 'access_key_secret', ($event.target as HTMLInputElement).value)">
+          </label>
         </div>
 
         <label class="field">
@@ -161,7 +184,6 @@ const emit = defineEmits<{
         </div>
 
         <div class="stat-line">
-          <span>{{ `配置 ${ossProfiles.find((item) => item.id === activeOssProfileId)?.name || '未命名配置'}` }}</span>
           <span>{{ `进度项 ${uploadProgressRows.length} 条` }}</span>
           <span>{{ uploadRequest ? `最近上传 ${timeText(uploadRequest.time)}` : '最近上传 暂无' }}</span>
         </div>
@@ -183,7 +205,9 @@ const emit = defineEmits<{
               <span>{{ item.uploadRate ? `${item.uploadRate} B/s` : '速率未知' }}</span>
               <span>{{ item.finishTime ? `完成 ${timeText(item.finishTime)}` : '未完成' }}</span>
             </div>
-            <div class="progress-bar"><div class="progress-fill" :style="{ width: `${Math.max(0, Math.min(100, item.progress))}%` }"></div></div>
+            <div class="progress-bar">
+              <div class="progress-fill" :style="{ width: `${Math.max(0, Math.min(100, item.progress))}%` }"></div>
+            </div>
           </article>
         </div>
       </div>
