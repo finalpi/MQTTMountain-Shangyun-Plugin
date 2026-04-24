@@ -71,7 +71,8 @@ export function moduleLabel(moduleCode: string): string {
 }
 
 export function createProfileId(): string {
-  return crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 export function nextProfileName(existingNames: string[]): string {

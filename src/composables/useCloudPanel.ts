@@ -50,6 +50,14 @@ function looksLikeDroneSn(value: unknown): value is string {
   return typeof value === 'string' && /^[A-Z0-9]{18,22}$/.test(value.trim());
 }
 
+function pickAirportSn(...values: unknown[]): string | undefined {
+  return values.find((value) => looksLikeAirportSn(value)) as string | undefined;
+}
+
+function pickDroneSn(...values: unknown[]): string | undefined {
+  return values.find((value) => looksLikeDroneSn(value)) as string | undefined;
+}
+
 function normalizeProfile(input: Partial<OssProfile>, usedNames: string[]): OssProfile {
   const fallback = emptyOssProfile(nextProfileName(usedNames));
   const name = String(input.name || '').trim() || fallback.name;
@@ -198,13 +206,12 @@ export function useCloudPanel() {
 
   function parsePublishMeta(item: PublishHistoryRow): PublishMeta {
     const topicParts = String(item.topic || '').split('/');
-    const airportSn = topicParts[0] === 'thing' || topicParts[0] === 'sys' ? topicParts[2] : undefined;
+    const topicSn = topicParts[0] === 'thing' || topicParts[0] === 'sys' ? topicParts[2] : undefined;
     const parsed = safeParse(item.payload) || {};
     const data = parsed.data && typeof parsed.data === 'object' ? parsed.data : {};
-    const pick = (...values: unknown[]) => values.find((value) => typeof value === 'string' && value.trim()) as string | undefined;
     return {
-      airportSn,
-      droneSn: pick(parsed.drone_sn, parsed.droneSn, data.drone_sn, data.droneSn, parsed.sub_device, data.sub_device),
+      airportSn: pickAirportSn(parsed.gateway, parsed.gateway_sn, parsed.gatewaySn, parsed.dock_sn, parsed.dockSn, data.gateway, data.gateway_sn, data.gatewaySn, data.dock_sn, data.dockSn, topicSn),
+      droneSn: pickDroneSn(parsed.drone_sn, parsed.droneSn, data.drone_sn, data.droneSn, parsed.sub_device, parsed.subDevice, data.sub_device, data.subDevice, parsed.device_sn, parsed.deviceSn, data.device_sn, data.deviceSn, parsed.sn, data.sn, topicSn),
       tid: typeof parsed.tid === 'string' ? parsed.tid : undefined,
       bid: typeof parsed.bid === 'string' ? parsed.bid : undefined,
       seq: typeof parsed.seq === 'number' ? parsed.seq : undefined,

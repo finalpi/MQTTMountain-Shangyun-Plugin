@@ -176,10 +176,16 @@ function inferDroneSn(body, topicSn) {
         body.subDevice,
         body.drone_sn,
         body.droneSn,
+        body.device_sn,
+        body.deviceSn,
+        body.sn,
         data.drone_sn,
         data.droneSn,
         data.sub_device,
-        data.subDevice
+        data.subDevice,
+        data.device_sn,
+        data.deviceSn,
+        data.sn
     );
     if (droneSn) return droneSn;
     if (looksLikeDroneSn(topicSn)) return topicSn;
@@ -351,6 +357,31 @@ function createServiceSender({ id, name, method, group = '快捷控制', dataPar
     };
 }
 
+function createReturnHomeSender() {
+    const uuid = crypto.randomUUID();
+    const now = Date.now();
+    return {
+        id: 'wayline.return_home',
+        name: '一键返航',
+        group: '航线控制',
+        topic: 'thing/product/{gateway}/services',
+        payloadTemplate: JSON.stringify({
+            tid: '{tid}',
+            bid: '{bid}',
+            timestamp: '{ts}__NUM__',
+            method: 'return_home',
+            data: null
+        }).replace('"{ts}__NUM__"', '{ts}'),
+        qos: 1,
+        params: [
+            { key: 'gateway', label: '机场 SN', required: true, placeholder: '例如 5YSZK8Q00200T9' },
+            { key: 'tid', label: 'tid', default: uuid },
+            { key: 'bid', label: 'bid', default: uuid },
+            { key: 'ts', label: 'timestamp (ms)', type: 'number', default: now }
+        ]
+    };
+}
+
 function createDrcSender({ id, name, method, group = '遥控指令' }) {
     const now = Date.now();
     return {
@@ -382,15 +413,7 @@ module.exports = {
         createServiceSender({ id: 'control.drone.power_off', name: '飞行器关机', method: 'drone_close' }),
         createServiceSender({ id: 'control.cover.open', name: '打开舱盖', method: 'cover_open' }),
         createServiceSender({ id: 'control.cover.close', name: '关闭舱盖', method: 'cover_close' }),
-        createServiceSender({
-            id: 'wayline.return_specific_home',
-            name: '一键返航',
-            method: 'return_specific_home',
-            group: '航线控制',
-            dataParams: [
-                { key: 'home_dock_sn', label: '返航目标机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' }
-            ]
-        }),
+        createReturnHomeSender(),
         createDrcSender({ id: 'drc.emergency_stop', name: '急停', method: 'drone_emergency_stop' }),
         createDrcSender({ id: 'drc.emergency_landing', name: '紧急降落', method: 'drc_emergency_landing' }),
         createDrcSender({ id: 'drc.force_landing', name: '强制降落', method: 'drc_force_landing' }),
