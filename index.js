@@ -171,9 +171,14 @@ function findModeCode(input, seen = new Set()) {
 
 function inferDroneSn(body, topicSn) {
     const data = body && typeof body.data === 'object' ? body.data : {};
+    const bodySubDevice = body && typeof body.sub_device === 'object' ? body.sub_device : {};
+    const dataSubDevice = data && typeof data.sub_device === 'object' ? data.sub_device : {};
     const droneSn = firstString(
         body.sub_device,
         body.subDevice,
+        bodySubDevice.device_sn,
+        bodySubDevice.deviceSn,
+        bodySubDevice.sn,
         body.drone_sn,
         body.droneSn,
         body.device_sn,
@@ -183,6 +188,9 @@ function inferDroneSn(body, topicSn) {
         data.droneSn,
         data.sub_device,
         data.subDevice,
+        dataSubDevice.device_sn,
+        dataSubDevice.deviceSn,
+        dataSubDevice.sn,
         data.device_sn,
         data.deviceSn,
         data.sn

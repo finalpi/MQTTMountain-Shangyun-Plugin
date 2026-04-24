@@ -58,12 +58,15 @@ function pickDroneSn(...values: unknown[]): string | undefined {
   return values.find((value) => looksLikeDroneSn(value)) as string | undefined;
 }
 
-function normalizeProfile(input: Partial<OssProfile>, usedNames: string[]): OssProfile {
+function normalizeProfile(input: Partial<OssProfile>, usedNames: string[], usedIds: Set<string>): OssProfile {
   const fallback = emptyOssProfile(nextProfileName(usedNames));
   const name = String(input.name || '').trim() || fallback.name;
+  const candidateId = String(input.id || '').trim();
+  const id = candidateId && !usedIds.has(candidateId) ? candidateId : fallback.id;
   usedNames.push(name);
+  usedIds.add(id);
   return {
-    id: String(input.id || fallback.id),
+    id,
     name,
     provider: String(input.provider || 'ali'),
     region: String(input.region || ''),
@@ -125,8 +128,9 @@ export function useCloudPanel() {
     try {
       const raw = JSON.parse(storage?.getItem(OSS_STORAGE_KEY) || '{}');
       const usedNames: string[] = [];
+      const usedIds = new Set<string>();
       const profiles = Array.isArray(raw.profiles) && raw.profiles.length
-        ? raw.profiles.map((item: Partial<OssProfile>) => normalizeProfile(item, usedNames))
+        ? raw.profiles.map((item: Partial<OssProfile>) => normalizeProfile(item, usedNames, usedIds))
         : [emptyOssProfile()];
       ossProfiles.value = profiles;
       activeOssProfileId.value = profiles.some((item: OssProfile) => item.id === raw.activeOssProfileId)
@@ -162,7 +166,12 @@ export function useCloudPanel() {
   function persistFormIntoProfiles(): void {
     const current = activeOssProfile.value;
     if (!current) return;
-    const next = normalizeProfile({ ...current, ...ossForm }, ossProfiles.value.filter((item) => item.id !== current.id).map((item) => item.name));
+    const otherProfiles = ossProfiles.value.filter((item) => item.id !== current.id);
+    const next = normalizeProfile(
+      { ...current, ...ossForm },
+      otherProfiles.map((item) => item.name),
+      new Set(otherProfiles.map((item) => item.id))
+    );
     ossProfiles.value = ossProfiles.value.map((item) => (item.id === current.id ? next : item));
     saveOssProfiles();
   }
