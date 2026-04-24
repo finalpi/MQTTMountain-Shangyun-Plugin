@@ -65,14 +65,27 @@ export function parseDateInput(value: string, fallback: number): number {
 }
 
 export function moduleLabel(moduleCode: string): string {
-  return moduleCode === '0' ? '飞行器' : moduleCode === '3' ? '机场' : `模块 ${moduleCode}`;
+  if (moduleCode === '0') return '飞行器';
+  if (moduleCode === '3') return '机场';
+  return `模块 ${moduleCode}`;
 }
 
 export function createProfileId(): string {
   return crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
 }
 
-export function emptyOssProfile(name = '默认配置'): OssProfile {
+export function nextProfileName(existingNames: string[]): string {
+  const used = new Set(existingNames.map((item) => item.trim()).filter(Boolean));
+  let index = 1;
+  while (used.has(`配置 ${index}`)) index += 1;
+  return `配置 ${index}`;
+}
+
+export function defaultExpireMs(): number {
+  return Date.now() + 24 * 60 * 60 * 1000;
+}
+
+export function emptyOssProfile(name = '配置 1'): OssProfile {
   return {
     id: createProfileId(),
     name,
@@ -81,7 +94,7 @@ export function emptyOssProfile(name = '默认配置'): OssProfile {
     bucket: '',
     endpoint: '',
     keyPrefix: '',
-    expire: '',
+    expire: String(defaultExpireMs()),
     access_key_id: '',
     access_key_secret: '',
     security_token: ''

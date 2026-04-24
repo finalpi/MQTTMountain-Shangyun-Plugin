@@ -123,7 +123,7 @@ const emit = defineEmits<{
           </label>
           <label class="field">
             <span>档案名称</span>
-            <input :value="ossForm.name" type="text" placeholder="例如 默认阿里云" @input="emit('update:ossField', 'name', ($event.target as HTMLInputElement).value)">
+            <input :value="ossForm.name" type="text" placeholder="例如 阿里云生产环境" @input="emit('update:ossField', 'name', ($event.target as HTMLInputElement).value)">
           </label>
         </div>
 
@@ -146,7 +146,6 @@ const emit = defineEmits<{
           <label class="field"><span>Bucket</span><input :value="ossForm.bucket" type="text" @input="emit('update:ossField', 'bucket', ($event.target as HTMLInputElement).value)"></label>
           <label class="field"><span>Endpoint</span><input :value="ossForm.endpoint" type="text" @input="emit('update:ossField', 'endpoint', ($event.target as HTMLInputElement).value)"></label>
           <label class="field"><span>上传前缀</span><input :value="ossForm.keyPrefix" type="text" @input="emit('update:ossField', 'keyPrefix', ($event.target as HTMLInputElement).value)"></label>
-          <label class="field"><span>Expire（可选）</span><input :value="ossForm.expire" type="number" @input="emit('update:ossField', 'expire', ($event.target as HTMLInputElement).value)"></label>
           <label class="field"><span>Access Key ID</span><input :value="ossForm.access_key_id" class="secret" type="text" @input="emit('update:ossField', 'access_key_id', ($event.target as HTMLInputElement).value)"></label>
           <label class="field"><span>Access Key Secret</span><input :value="ossForm.access_key_secret" class="secret" type="password" @input="emit('update:ossField', 'access_key_secret', ($event.target as HTMLInputElement).value)"></label>
         </div>

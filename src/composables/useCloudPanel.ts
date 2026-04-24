@@ -12,10 +12,12 @@ import type {
 } from '../types/panel';
 import {
   bytesText,
+  defaultExpireMs,
   emptyOssProfile,
   emptySnapshot,
   formatDateInput,
   moduleLabel,
+  nextProfileName,
   parseDateInput,
   safeParse,
   shortTime,
@@ -38,6 +40,25 @@ function storageLike(): Pick<Storage, 'getItem' | 'setItem'> | null {
   } catch {
     return null;
   }
+}
+
+function normalizeProfile(input: Partial<OssProfile>, usedNames: string[]): OssProfile {
+  const fallback = emptyOssProfile(nextProfileName(usedNames));
+  const name = String(input.name || '').trim() || fallback.name;
+  usedNames.push(name);
+  return {
+    id: String(input.id || fallback.id),
+    name,
+    provider: String(input.provider || 'ali'),
+    region: String(input.region || ''),
+    bucket: String(input.bucket || ''),
+    endpoint: String(input.endpoint || ''),
+    keyPrefix: String(input.keyPrefix || ''),
+    expire: String(input.expire || defaultExpireMs()),
+    access_key_id: String(input.access_key_id || ''),
+    access_key_secret: String(input.access_key_secret || ''),
+    security_token: String(input.security_token || '')
+  };
 }
 
 export function useCloudPanel() {
@@ -68,7 +89,7 @@ export function useCloudPanel() {
     bucket: '',
     endpoint: '',
     keyPrefix: '',
-    expire: '',
+    expire: String(defaultExpireMs()),
     access_key_id: '',
     access_key_secret: '',
     security_token: ''
@@ -87,9 +108,14 @@ export function useCloudPanel() {
     const storage = storageLike();
     try {
       const raw = JSON.parse(storage?.getItem(OSS_STORAGE_KEY) || '{}');
-      const profiles = Array.isArray(raw.profiles) && raw.profiles.length ? raw.profiles as OssProfile[] : [emptyOssProfile()];
+      const usedNames: string[] = [];
+      const profiles = Array.isArray(raw.profiles) && raw.profiles.length
+        ? raw.profiles.map((item: Partial<OssProfile>) => normalizeProfile(item, usedNames))
+        : [emptyOssProfile()];
       ossProfiles.value = profiles;
-      activeOssProfileId.value = raw.activeOssProfileId || profiles[0].id;
+      activeOssProfileId.value = profiles.some((item: OssProfile) => item.id === raw.activeOssProfileId)
+        ? raw.activeOssProfileId
+        : profiles[0].id;
     } catch {
       ossProfiles.value = [emptyOssProfile()];
       activeOssProfileId.value = ossProfiles.value[0].id;
@@ -120,8 +146,8 @@ export function useCloudPanel() {
   function persistFormIntoProfiles(): void {
     const current = activeOssProfile.value;
     if (!current) return;
-    const next = { ...current, ...ossForm };
-    ossProfiles.value = ossProfiles.value.map((item) => item.id === next.id ? next : item);
+    const next = normalizeProfile({ ...current, ...ossForm }, ossProfiles.value.filter((item) => item.id !== current.id).map((item) => item.name));
+    ossProfiles.value = ossProfiles.value.map((item) => (item.id === current.id ? next : item));
     saveOssProfiles();
   }
 
@@ -137,11 +163,12 @@ export function useCloudPanel() {
   }, { deep: true });
 
   function createNewProfile(): void {
-    const profile = emptyOssProfile('新配置');
+    const profile = emptyOssProfile(nextProfileName(ossProfiles.value.map((item) => item.name)));
     ossProfiles.value = [profile, ...ossProfiles.value];
     activeOssProfileId.value = profile.id;
+    loadActiveProfileIntoForm();
     saveOssProfiles();
-    setFeedback('已创建新的 OSS 配置档案');
+    setFeedback(`已创建 ${profile.name}`);
   }
 
   function deleteCurrentProfile(): void {
@@ -154,7 +181,7 @@ export function useCloudPanel() {
 
   function saveCurrentProfile(): void {
     persistFormIntoProfiles();
-    setFeedback('OSS 配置已保存');
+    setFeedback(`已保存 ${ossForm.name || '当前配置'}`);
   }
 
   function historyKey(item: { time: number; topic: string; payload: string }): string {
@@ -168,7 +195,7 @@ export function useCloudPanel() {
 
   function parsePublishMeta(item: PublishHistoryRow): PublishMeta {
     const topicParts = String(item.topic || '').split('/');
-    const airportSn = (topicParts[0] === 'thing' || topicParts[0] === 'sys') ? topicParts[2] : undefined;
+    const airportSn = topicParts[0] === 'thing' || topicParts[0] === 'sys' ? topicParts[2] : undefined;
     const parsed = safeParse(item.payload) || {};
     const data = parsed.data && typeof parsed.data === 'object' ? parsed.data : {};
     const pick = (...values: unknown[]) => values.find((value) => typeof value === 'string' && value.trim()) as string | undefined;
@@ -226,17 +253,6 @@ export function useCloudPanel() {
       });
     });
     return out.sort((a, b) => b.startTime - a.startTime);
-  }
-
-  function logTimeRange(entries: LogEntry[]): { min: number; max: number } | null {
-    if (!entries.length) return null;
-    let min = entries[0].startTime;
-    let max = entries[0].endTime;
-    entries.forEach((item) => {
-      if (item.startTime < min) min = item.startTime;
-      if (item.endTime > max) max = item.endTime;
-    });
-    return { min, max };
   }
 
   function normalizeSnapshot(next: any): HostSnapshot {
@@ -446,13 +462,14 @@ export function useCloudPanel() {
 
   const selectedEntry = computed(() => filteredHistory.value.find((entry) => entry.key === selectedHistoryKey.value) || null);
   const relatedRows = computed(() => {
-    if (!selectedEntry.value) return [] as TimelineRow[];
+    const entry = selectedEntry.value;
+    if (!entry) return [] as TimelineRow[];
     return [...cloudMessages.value].filter((row) => {
       const meta = cloudMeta(row);
-      if (!meta || row.time < selectedEntry.value!.item.time) return false;
-      if (selectedEntry.value!.meta.tid && meta.tid === selectedEntry.value!.meta.tid) return true;
-      if (selectedEntry.value!.meta.bid && meta.bid === selectedEntry.value!.meta.bid) return true;
-      if (selectedEntry.value!.meta.seq != null && meta.seq === selectedEntry.value!.meta.seq) return true;
+      if (!meta || row.time < entry.item.time) return false;
+      if (entry.meta.tid && meta.tid === entry.meta.tid) return true;
+      if (entry.meta.bid && meta.bid === entry.meta.bid) return true;
+      if (entry.meta.seq != null && meta.seq === entry.meta.seq) return true;
       return false;
     }).sort((a, b) => a.time - b.time);
   });
@@ -619,22 +636,17 @@ export function useCloudPanel() {
       module: String(items[0].module),
       list: items.map((item) => ({ boot_index: item.bootIndex }))
     }));
-    const credentials: Record<string, string | number | null> = {
-      access_key_id: profile.access_key_id,
-      access_key_secret: profile.access_key_secret,
-      expire: null,
-      security_token: ''
-    };
-    const expireValue = String(profile.expire || '').trim();
-    if (expireValue) credentials.expire = Number(expireValue);
-    credentials.security_token = String(profile.security_token || '');
-
     const payload = {
       bucket: profile.bucket,
       region: profile.region,
       endpoint: profile.endpoint,
       provider: profile.provider,
-      credentials,
+      credentials: {
+        access_key_id: profile.access_key_id,
+        access_key_secret: profile.access_key_secret,
+        expire: defaultExpireMs(),
+        security_token: String(profile.security_token || '')
+      },
       params: { files }
     };
     const sent = await publishService('fileupload_start', airport.value, payload);
