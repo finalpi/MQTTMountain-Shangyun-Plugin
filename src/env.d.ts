@@ -7,6 +7,7 @@ declare global {
       bridge?: {
         getSnapshot?: () => any;
         publish?: (payload: any) => Promise<any>;
+        rememberParams?: (values: Record<string, unknown>) => void;
       };
       view?: {
         id: string;

@@ -19,6 +19,7 @@ export interface CloudMeta {
   seq?: number;
   isReply?: boolean;
   debugState?: 'enabled' | 'disabled';
+  debugStateSource?: string;
   modeCode?: number;
   [key: string]: unknown;
 }

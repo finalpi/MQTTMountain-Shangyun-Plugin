@@ -466,6 +466,11 @@ module.exports = {
                     messageKind: 'telemetry',
                     direction: suffix.startsWith('services') ? 'down' : 'up',
                     isReply: suffix.endsWith('_reply')
+                },
+                rememberParams: {
+                    sn,
+                    airportSn: sn,
+                    gateway: sn
                 }
             };
         }

@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { OssProfile } from './types/panel';
 import PanelHeader from './components/PanelHeader.vue';
 import LogWorkspace from './components/LogWorkspace.vue';
 import HistoryWorkspace from './components/HistoryWorkspace.vue';
 import { useCloudPanel } from './composables/useCloudPanel';
+
+const BASE_PAGE_WIDTH = 980;
 
 const panel = useCloudPanel();
 const {
@@ -64,10 +67,37 @@ const {
 function updateOssField(field: keyof OssProfile, value: string): void {
   ossForm[field] = value as never;
 }
+
+const viewportWidth = ref(window.innerWidth);
+const pageScale = computed(() => {
+  const padding = viewportWidth.value <= BASE_PAGE_WIDTH ? 24 : 32;
+  return Math.min(1, Math.max(0.6, (viewportWidth.value - padding) / BASE_PAGE_WIDTH));
+});
+const pageStyle = computed(() => {
+  const scale = pageScale.value;
+  if (scale >= 1) return {};
+  return {
+    width: `${BASE_PAGE_WIDTH}px`,
+    minHeight: `calc((100vh - 24px) / ${scale})`,
+    transform: `scale(${scale})`
+  };
+});
+
+function updateViewportWidth(): void {
+  viewportWidth.value = window.innerWidth;
+}
+
+onMounted(() => {
+  window.addEventListener('resize', updateViewportWidth);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateViewportWidth);
+});
 </script>
 
 <template>
-  <div class="page">
+  <div class="page" :style="pageStyle">
     <PanelHeader
       :current-connection="currentConnection"
       :debug-state="debugStatus.state"
@@ -165,6 +195,7 @@ function updateOssField(field: keyof OssProfile, value: string): void {
 html, body {
   margin: 0;
   min-height: 100%;
+  overflow-x: hidden;
   background:
     radial-gradient(circle at top right, rgba(56, 189, 248, 0.12), transparent 28%),
     radial-gradient(circle at top left, rgba(52, 211, 153, 0.08), transparent 25%),
@@ -174,11 +205,12 @@ html, body {
 body { padding: 16px; }
 button, input, select { font: inherit; }
 button { cursor: pointer; }
-.page { display: flex; flex-direction: column; gap: 14px; min-height: calc(100vh - 32px); }
-.topbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.page { display: flex; flex-direction: column; gap: 14px; width: 100%; min-height: calc(100vh - 32px); transform-origin: top left; }
+.topbar { display: flex; gap: 12px; align-items: center; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
 .badge, .status-pill, .notice {
   display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px;
   background: rgba(15, 23, 42, 0.78); border: 1px solid var(--line); color: var(--muted);
+  white-space: nowrap;
 }
 .badge.online { color: var(--good); border-color: rgba(52, 211, 153, 0.28); background: rgba(52, 211, 153, 0.12); }
 .badge.offline { color: var(--bad); border-color: rgba(248, 113, 113, 0.26); background: rgba(248, 113, 113, 0.1); }
@@ -198,7 +230,7 @@ select, input, .action-button {
 .status-card {
   background: linear-gradient(135deg, rgba(30, 41, 59, 0.92), rgba(15, 23, 42, 0.9));
   border: 1px solid var(--line); border-radius: 18px; padding: 16px 18px;
-  display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  display: flex; justify-content: space-between; gap: 16px; flex-wrap: nowrap;
 }
 .status-main { display: flex; flex-direction: column; gap: 8px; }
 .status-title { color: var(--muted); font-size: 12px; letter-spacing: 0.04em; }
@@ -266,6 +298,6 @@ pre {
 .secret { font-family: Consolas, "JetBrains Mono", monospace; }
 @media (max-width: 980px) {
   body { padding: 12px; }
-  .toolbar, .workspace, .layout, .subgrid { grid-template-columns: 1fr; }
+  .page { min-height: calc(100vh - 24px); }
 }
 </style>

@@ -121,6 +121,7 @@ export function useCloudPanel() {
   let profileFormSyncing = false;
   let profilesReady = false;
   let refreshTimer: number | null = null;
+  let lastAirportOptionsSignature = '';
 
   function setFeedback(text: string, tone: 'info' | 'error' = 'info'): void {
     feedback.value = text;
@@ -400,6 +401,34 @@ export function useCloudPanel() {
     }, timeoutMs, 1000);
   }
 
+  async function waitForDebugEnabled(airportSn: string, sinceTime: number, timeoutMs = 30000): Promise<TimelineRow> {
+    return waitFor((next) => {
+      for (let i = next.messages.length - 1; i >= 0; i -= 1) {
+        const row = next.messages[i];
+        if (row.time < sinceTime) continue;
+        const meta = cloudMeta(row);
+        if (!meta || meta.airportSn !== airportSn || meta.debugState !== 'enabled') continue;
+        if (meta.direction === 'down' && meta.debugStateSource === 'method') continue;
+        return row;
+      }
+      return null;
+    }, timeoutMs, 1000);
+  }
+
+  async function waitForDroneOsd(airportSn: string, droneSn: string, sinceTime: number, timeoutMs = 90000): Promise<TimelineRow> {
+    return waitFor((next) => {
+      for (let i = next.messages.length - 1; i >= 0; i -= 1) {
+        const row = next.messages[i];
+        if (row.time < sinceTime) continue;
+        const meta = cloudMeta(row);
+        if (!meta || meta.topicKind !== 'osd' || meta.airportSn !== airportSn || !meta.droneSn) continue;
+        if (droneSn !== 'all' && meta.droneSn !== droneSn) continue;
+        return row;
+      }
+      return null;
+    }, timeoutMs, 1000);
+  }
+
   async function publishService(method: string, airportSn: string, data?: Record<string, unknown>): Promise<{ time: number; ids: { tid: string; bid: string } }> {
     if (!bridge || typeof bridge.publish !== 'function') throw new Error('宿主发布能力不可用');
     const time = Date.now();
@@ -485,7 +514,24 @@ export function useCloudPanel() {
 
   watch(airportOptions, (options) => {
     if (airport.value !== 'all' && !options.includes(airport.value)) airport.value = 'all';
+    const signature = options.join('\n');
+    if (!options.length || signature === lastAirportOptionsSignature) return;
+    lastAirportOptionsSignature = signature;
+    bridge?.rememberParams?.({
+      airportSn: options,
+      gateway: options,
+      sn: options
+    });
   }, { immediate: true });
+
+  watch(airport, (value) => {
+    if (value === 'all') return;
+    bridge?.rememberParams?.({
+      airportSn: value,
+      gateway: value,
+      sn: value
+    });
+  });
 
   watch(visibleDroneOptions, (options) => {
     if (drone.value !== 'all' && !options.includes(drone.value)) drone.value = 'all';
@@ -519,7 +565,14 @@ export function useCloudPanel() {
 
   const callbackRows = computed(() => relatedRows.value.filter((row) => !!cloudMeta(row)?.isReply));
   const debugStatus = computed(() => {
-    const row = cloudMessages.value.find((item) => !!cloudMeta(item)?.debugState);
+    const selectedAirport = airport.value;
+    const row = selectedAirport === 'all'
+      ? null
+      : cloudMessages.value.find((item) => {
+        const meta = cloudMeta(item);
+        if (!meta?.debugState || meta.airportSn !== selectedAirport) return false;
+        return !(meta.direction === 'down' && meta.debugStateSource === 'method');
+      });
     const meta = row ? cloudMeta(row) : null;
     return {
       state: meta?.debugState || 'unknown',
@@ -619,15 +672,22 @@ export function useCloudPanel() {
 
   async function restartBootstrap(): Promise<void> {
     if (airport.value === 'all') throw new Error('请先选择机场');
+    setFeedback('正在开启 Debug...');
     const openDebug = await publishService('debug_mode_open', airport.value);
     await waitForServiceAck('debug_mode_open', openDebug.ids, openDebug.time);
+    setFeedback('正在确认 Debug 已开启...');
+    await waitForDebugEnabled(airport.value, openDebug.time, 30000);
+
+    setFeedback('正在开启无人机...');
     const droneOpen = await publishService('drone_open', airport.value);
     await waitForServiceAck('drone_open', droneOpen.ids, droneOpen.time, 30000);
+    setFeedback('正在等待无人机 OSD...');
+    await waitForDroneOsd(airport.value, drone.value, droneOpen.time, 120000);
+
+    setFeedback('正在重启机场...');
     const reboot = await publishService('device_reboot', airport.value);
     await waitForServiceAck('device_reboot', reboot.ids, reboot.time, 30000);
     await waitForAirportOnline(airport.value, reboot.time, 120000);
-    const closeDebug = await publishService('debug_mode_close', airport.value);
-    await waitForServiceAck('debug_mode_close', closeDebug.ids, closeDebug.time, 30000);
     setFeedback('重启注册上线流程已完成');
   }
 
