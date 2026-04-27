@@ -93,6 +93,24 @@ const MODE_CODE_LABEL = {
     5: '待标定'
 };
 
+function uuidParam(key, defaultValue) {
+    return { key, label: key, default: defaultValue, actions: [{ id: 'randomUuid', label: '随机' }] };
+}
+
+function timestampParam(defaultValue) {
+    return {
+        key: 'ts',
+        label: 'timestamp (ms)',
+        type: 'number',
+        default: defaultValue,
+        actions: [{ id: 'currentTimestamp', label: '当前时间' }]
+    };
+}
+
+function randomUuid() {
+    return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 function safeParseJson(text) {
     try {
         return JSON.parse(text);
@@ -322,9 +340,9 @@ function createDebugSender(id, name, method) {
         qos: 1,
         params: [
             { key: 'airportSn', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' },
-            { key: 'tid', label: 'tid', default: uuid },
-            { key: 'bid', label: 'bid', default: uuid },
-            { key: 'ts', label: 'timestamp (ms)', type: 'number', default: now }
+            uuidParam('tid', uuid),
+            uuidParam('bid', uuid),
+            timestampParam(now)
         ]
     };
 }
@@ -341,9 +359,9 @@ function createServiceSender({ id, name, method, group = '快捷控制', dataPar
         data[param.key] = `{${param.key}}`;
     }
     params.push(
-        { key: 'tid', label: 'tid', default: uuid },
-        { key: 'bid', label: 'bid', default: uuid },
-        { key: 'ts', label: 'timestamp (ms)', type: 'number', default: now }
+        uuidParam('tid', uuid),
+        uuidParam('bid', uuid),
+        timestampParam(now)
     );
 
     const payload = {
@@ -383,9 +401,9 @@ function createReturnHomeSender() {
         qos: 1,
         params: [
             { key: 'gateway', label: '机场 SN', required: true, placeholder: '例如 5YSZK8Q00200T9' },
-            { key: 'tid', label: 'tid', default: uuid },
-            { key: 'bid', label: 'bid', default: uuid },
-            { key: 'ts', label: 'timestamp (ms)', type: 'number', default: now }
+            uuidParam('tid', uuid),
+            uuidParam('bid', uuid),
+            timestampParam(now)
         ]
     };
 }
@@ -428,6 +446,12 @@ module.exports = {
         createDebugSender('debug.mode.open', '开启 Debug 模式', 'debug_mode_open'),
         createDebugSender('debug.mode.close', '关闭 Debug 模式', 'debug_mode_close')
     ]),
+
+    senderParamAction(request) {
+        if (request.actionId === 'randomUuid') return randomUuid();
+        if (request.actionId === 'currentTimestamp') return Date.now();
+        throw new Error(`未知参数动作：${request.actionId}`);
+    },
 
     topicLabel(topic) {
         const match = topic.match(TOPIC_RE);
