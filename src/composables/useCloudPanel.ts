@@ -26,6 +26,7 @@ import {
 } from '../utils/panelFormat';
 
 const OSS_STORAGE_KEY = 'mm.plugin.dji.oss-profiles.v1';
+const SELECTION_STORAGE_KEY = 'mm.plugin.dji.selection.v1';
 
 function debugProfileLog(label: string, payload: unknown): void {
   console.log(`[cloud-panel][profiles] ${label}`, payload);
@@ -122,10 +123,44 @@ export function useCloudPanel() {
   let profilesReady = false;
   let refreshTimer: number | null = null;
   let lastAirportOptionsSignature = '';
+  let selectionSyncing = false;
 
   function setFeedback(text: string, tone: 'info' | 'error' = 'info'): void {
     feedback.value = text;
     feedbackTone.value = tone;
+  }
+
+  function selectionStorageKey(): string {
+    return snapshot.value.selectedConnectionId || 'default';
+  }
+
+  function loadSelection(): void {
+    const storage = storageLike();
+    try {
+      const raw = JSON.parse(storage?.getItem(SELECTION_STORAGE_KEY) || '{}');
+      const current = raw[selectionStorageKey()] || {};
+      selectionSyncing = true;
+      airport.value = typeof current.airport === 'string' ? current.airport : 'all';
+      drone.value = typeof current.drone === 'string' ? current.drone : 'all';
+    } catch {
+      selectionSyncing = true;
+      airport.value = 'all';
+      drone.value = 'all';
+    } finally {
+      selectionSyncing = false;
+    }
+  }
+
+  function saveSelection(): void {
+    if (selectionSyncing) return;
+    const storage = storageLike();
+    try {
+      const raw = JSON.parse(storage?.getItem(SELECTION_STORAGE_KEY) || '{}');
+      raw[selectionStorageKey()] = { airport: airport.value, drone: drone.value };
+      storage?.setItem(SELECTION_STORAGE_KEY, JSON.stringify(raw));
+    } catch {
+      // Ignore storage errors.
+    }
   }
 
   function loadOssProfiles(): void {
@@ -274,8 +309,21 @@ export function useCloudPanel() {
     const data = body && typeof body.data === 'object' ? body.data : {};
     const output = data && typeof data.output === 'object' ? data.output : {};
     if (typeof output.status === 'string') return output.status;
+    if (typeof body.result === 'number') return body.result === 0 ? 'ok' : 'failed';
     if (typeof data.result === 'number') return data.result === 0 ? 'ok' : 'failed';
     return null;
+  }
+
+  function methodMatches(actual: string | undefined, expected: string): boolean {
+    return !actual || actual === expected || actual === `${expected}_reply`;
+  }
+
+  function isDeviceDebugState(meta: CloudMeta | null, airportSn: string, state?: 'enabled' | 'disabled'): boolean {
+    if (!meta?.debugState || meta.airportSn !== airportSn) return false;
+    if (state && meta.debugState !== state) return false;
+    if (meta.debugStateSource === 'method') return false;
+    if (meta.debugStateSource === 'mode_code') return meta.topicKind === 'osd';
+    return true;
   }
 
   function selectedModules(): string[] {
@@ -356,7 +404,7 @@ export function useCloudPanel() {
         const row = next.messages[i];
         if (row.time < sinceTime) continue;
         const meta = cloudMeta(row);
-        if (!meta || !meta.isReply || meta.method !== method) continue;
+        if (!meta || !meta.isReply || !methodMatches(meta.method, method)) continue;
         if (ids.tid && meta.tid !== ids.tid) continue;
         if (ids.bid && meta.bid !== ids.bid) continue;
         const body = parseRowBody(row);
@@ -376,7 +424,7 @@ export function useCloudPanel() {
         const row = next.messages[i];
         if (row.time < sinceTime) continue;
         const meta = cloudMeta(row);
-        if (!meta || !meta.isReply || meta.method !== method) continue;
+        if (!meta || !meta.isReply || !methodMatches(meta.method, method)) continue;
         if (ids.tid && meta.tid !== ids.tid) continue;
         if (ids.bid && meta.bid !== ids.bid) continue;
         const status = serviceStatusOf(row);
@@ -401,15 +449,46 @@ export function useCloudPanel() {
     }, timeoutMs, 1000);
   }
 
-  async function waitForDebugEnabled(airportSn: string, sinceTime: number, timeoutMs = 30000): Promise<TimelineRow> {
+  async function waitForDebugState(airportSn: string, state: 'enabled' | 'disabled', sinceTime: number, timeoutMs = 30000): Promise<TimelineRow> {
     return waitFor((next) => {
       for (let i = next.messages.length - 1; i >= 0; i -= 1) {
         const row = next.messages[i];
         if (row.time < sinceTime) continue;
         const meta = cloudMeta(row);
-        if (!meta || meta.airportSn !== airportSn || meta.debugState !== 'enabled') continue;
-        if (meta.direction === 'down' && meta.debugStateSource === 'method') continue;
+        if (!isDeviceDebugState(meta, airportSn, state)) continue;
         return row;
+      }
+      return null;
+    }, timeoutMs, 1000);
+  }
+
+  async function waitForDebugAckOrState(
+    method: 'debug_mode_open' | 'debug_mode_close',
+    ids: { tid?: string; bid?: string },
+    airportSn: string,
+    sinceTime: number,
+    timeoutMs = 30000
+  ): Promise<void> {
+    const targetState = method === 'debug_mode_open' ? 'enabled' : 'disabled';
+    await waitFor((next) => {
+      for (let i = next.messages.length - 1; i >= 0; i -= 1) {
+        const row = next.messages[i];
+        if (row.time < sinceTime) continue;
+        const meta = cloudMeta(row);
+        if (!meta || meta.airportSn !== airportSn) continue;
+
+        if (isDeviceDebugState(meta, airportSn, targetState)) {
+          return row;
+        }
+
+        if (!meta.isReply || !methodMatches(meta.method, method)) continue;
+        if (ids.tid && meta.tid !== ids.tid) continue;
+        if (ids.bid && meta.bid !== ids.bid) continue;
+        const status = serviceStatusOf(row);
+        if (status === 'ok') return row;
+        if (status && !['sent', 'in_progress'].includes(status)) {
+          throw new Error(`${method} 返回 ${status}`);
+        }
       }
       return null;
     }, timeoutMs, 1000);
@@ -489,10 +568,6 @@ export function useCloudPanel() {
       }
     });
 
-    [...(snapshot.value.paramSuggestions.airportSn || []), ...(snapshot.value.paramSuggestions.gateway || [])].forEach((value) => {
-      if (looksLikeAirportSn(value)) airportSet.add(value);
-    });
-
     return [...airportSet].sort();
   });
 
@@ -500,7 +575,6 @@ export function useCloudPanel() {
     const out = new Set<string>();
     publishEntries.value.forEach((entry) => { if (looksLikeDroneSn(entry.meta.droneSn)) out.add(entry.meta.droneSn); });
     cloudMessages.value.forEach((row) => { const meta = cloudMeta(row); if (looksLikeDroneSn(meta?.droneSn)) out.add(meta.droneSn); });
-    (snapshot.value.paramSuggestions.droneSn || []).forEach((value) => { if (looksLikeDroneSn(value)) out.add(value); });
     return [...out].sort();
   });
 
@@ -512,34 +586,47 @@ export function useCloudPanel() {
     }));
   });
 
+  function syncAirportParamSuggestions(options: string[]): void {
+    if (!options.length) return;
+    const selected = airport.value !== 'all' && options.includes(airport.value) ? airport.value : '';
+    const ordered = selected ? [selected, ...options.filter((item) => item !== selected)] : options;
+    const signature = ordered.join('\n');
+    if (signature === lastAirportOptionsSignature) return;
+    lastAirportOptionsSignature = signature;
+    bridge?.setParamSuggestions?.({
+      airportSn: ordered,
+      gateway: ordered,
+      sn: ordered
+    });
+  }
+
   watch(airportOptions, (options) => {
     if (airport.value !== 'all' && !options.includes(airport.value)) airport.value = 'all';
-    const signature = options.join('\n');
-    if (!options.length || signature === lastAirportOptionsSignature) return;
-    lastAirportOptionsSignature = signature;
-    bridge?.rememberParams?.({
-      airportSn: options,
-      gateway: options,
-      sn: options
-    });
+    syncAirportParamSuggestions(options);
   }, { immediate: true });
 
   watch(airport, (value) => {
     if (value === 'all') return;
-    bridge?.rememberParams?.({
-      airportSn: value,
-      gateway: value,
-      sn: value
-    });
+    syncAirportParamSuggestions(airportOptions.value);
+    saveSelection();
+  });
+
+  watch(drone, () => {
+    saveSelection();
   });
 
   watch(visibleDroneOptions, (options) => {
     if (drone.value !== 'all' && !options.includes(drone.value)) drone.value = 'all';
   }, { immediate: true });
 
+  watch(() => snapshot.value.selectedConnectionId, () => {
+    loadSelection();
+    lastAirportOptionsSignature = '';
+    syncAirportParamSuggestions(airportOptions.value);
+  });
+
   const filteredHistory = computed(() => publishEntries.value.filter((entry) => {
     if (airport.value !== 'all' && entry.meta.airportSn !== airport.value) return false;
-    if (drone.value !== 'all' && entry.meta.droneSn !== drone.value) return false;
     return true;
   }).slice(0, 5));
 
@@ -570,8 +657,7 @@ export function useCloudPanel() {
       ? null
       : cloudMessages.value.find((item) => {
         const meta = cloudMeta(item);
-        if (!meta?.debugState || meta.airportSn !== selectedAirport) return false;
-        return !(meta.direction === 'down' && meta.debugStateSource === 'method');
+        return isDeviceDebugState(meta, selectedAirport);
       });
     const meta = row ? cloudMeta(row) : null;
     return {
@@ -666,21 +752,20 @@ export function useCloudPanel() {
     if (airport.value === 'all') throw new Error('请先选择机场');
     const method = debugStatus.value.state === 'enabled' ? 'debug_mode_close' : 'debug_mode_open';
     const sent = await publishService(method, airport.value);
-    await waitForServiceAck(method, sent.ids, sent.time);
-    setFeedback(`${method} 已发送`);
+    await waitForDebugAckOrState(method, sent.ids, airport.value, sent.time);
+    setFeedback(method === 'debug_mode_open' ? 'Debug 已开启' : 'Debug 已关闭');
   }
 
   async function restartBootstrap(): Promise<void> {
     if (airport.value === 'all') throw new Error('请先选择机场');
     setFeedback('正在开启 Debug...');
     const openDebug = await publishService('debug_mode_open', airport.value);
-    await waitForServiceAck('debug_mode_open', openDebug.ids, openDebug.time);
+    await waitForDebugAckOrState('debug_mode_open', openDebug.ids, airport.value, openDebug.time);
     setFeedback('正在确认 Debug 已开启...');
-    await waitForDebugEnabled(airport.value, openDebug.time, 30000);
+    await waitForDebugState(airport.value, 'enabled', openDebug.time, 30000);
 
     setFeedback('正在开启无人机...');
     const droneOpen = await publishService('drone_open', airport.value);
-    await waitForServiceAck('drone_open', droneOpen.ids, droneOpen.time, 30000);
     setFeedback('正在等待无人机 OSD...');
     await waitForDroneOsd(airport.value, drone.value, droneOpen.time, 120000);
 
@@ -773,6 +858,7 @@ export function useCloudPanel() {
     if (!logStartTime.value) logStartTime.value = formatDateInput(Date.now() - 24 * 60 * 60 * 1000);
     if (!logEndTime.value) logEndTime.value = formatDateInput(Date.now());
     refreshSnapshot();
+    loadSelection();
     refreshTimer = window.setInterval(refreshSnapshot, 1200);
   });
 

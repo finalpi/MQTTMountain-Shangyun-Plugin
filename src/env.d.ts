@@ -8,6 +8,7 @@ declare global {
         getSnapshot?: () => any;
         publish?: (payload: any) => Promise<any>;
         rememberParams?: (values: Record<string, unknown>) => void;
+        setParamSuggestions?: (values: Record<string, unknown[]>) => void;
       };
       view?: {
         id: string;
