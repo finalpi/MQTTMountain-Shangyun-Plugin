@@ -46,6 +46,10 @@ export interface HostSnapshot {
   messages: TimelineRow[];
   publishHistory: PublishHistoryRow[];
   paramSuggestions: Record<string, string[]>;
+  timelineVersion?: number;
+  publishHistoryVersion?: number;
+  receiveCount?: number;
+  publishCount?: number;
 }
 
 export interface PublishMeta {

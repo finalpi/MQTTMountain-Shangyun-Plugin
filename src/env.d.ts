@@ -5,7 +5,11 @@ declare global {
     MqttMountainHost?: {
       api?: Record<string, any>;
       bridge?: {
-        getSnapshot?: () => any;
+        getSnapshot?: (options?: {
+          messageLimit?: number;
+          publishLimit?: number;
+          includeParamSuggestions?: boolean;
+        }) => any;
         publish?: (payload: any) => Promise<any>;
         rememberParams?: (values: Record<string, unknown>) => void;
         setParamSuggestions?: (values: Record<string, unknown[]>) => void;

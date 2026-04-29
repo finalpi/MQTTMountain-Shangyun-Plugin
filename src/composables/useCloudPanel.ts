@@ -27,6 +27,8 @@ import {
 
 const OSS_STORAGE_KEY = 'mm.plugin.dji.oss-profiles.v1';
 const SELECTION_STORAGE_KEY = 'mm.plugin.dji.selection.v1';
+const SNAPSHOT_MESSAGE_LIMIT = 5000;
+const SNAPSHOT_PUBLISH_LIMIT = 50;
 
 function debugProfileLog(label: string, payload: unknown): void {
   console.log(`[cloud-panel][profiles] ${label}`, payload);
@@ -85,6 +87,26 @@ function normalizeProfile(input: Partial<OssProfile>, usedNames: string[], usedI
   };
 }
 
+function snapshotSignature(input: HostSnapshot): string {
+  const lastMessage = input.messages[input.messages.length - 1];
+  const lastPublish = input.publishHistory[input.publishHistory.length - 1];
+  return [
+    input.selectedConnectionId || '',
+    input.selectedConnectionState || '',
+    input.connections.length,
+    input.timelineVersion ?? '',
+    input.publishHistoryVersion ?? '',
+    input.receiveCount ?? '',
+    input.publishCount ?? '',
+    input.messages.length,
+    lastMessage?.time || 0,
+    lastMessage?.topic || '',
+    input.publishHistory.length,
+    lastPublish?.time || 0,
+    lastPublish?.topic || ''
+  ].join('|');
+}
+
 export function useCloudPanel() {
   const host = window.MqttMountainHost || {};
   const bridge = host.bridge;
@@ -124,6 +146,7 @@ export function useCloudPanel() {
   let refreshTimer: number | null = null;
   let lastAirportOptionsSignature = '';
   let selectionSyncing = false;
+  let lastSnapshotSig = snapshotSignature(snapshot.value);
 
   function setFeedback(text: string, tone: 'info' | 'error' = 'info'): void {
     feedback.value = text;
@@ -369,17 +392,29 @@ export function useCloudPanel() {
       publishHistory: Array.isArray(current.publishHistory) ? current.publishHistory : [],
       paramSuggestions: current.paramSuggestions && typeof current.paramSuggestions === 'object'
         ? current.paramSuggestions
-        : { sn: [], airportSn: [], gateway: [], droneSn: [] }
+        : { sn: [], airportSn: [], gateway: [], droneSn: [] },
+      timelineVersion: typeof current.timelineVersion === 'number' ? current.timelineVersion : undefined,
+      publishHistoryVersion: typeof current.publishHistoryVersion === 'number' ? current.publishHistoryVersion : undefined,
+      receiveCount: typeof current.receiveCount === 'number' ? current.receiveCount : undefined,
+      publishCount: typeof current.publishCount === 'number' ? current.publishCount : undefined
     };
   }
 
   function readSnapshot(): HostSnapshot {
     if (!bridge || typeof bridge.getSnapshot !== 'function') return emptySnapshot();
-    return normalizeSnapshot(bridge.getSnapshot());
+    return normalizeSnapshot(bridge.getSnapshot({
+      messageLimit: SNAPSHOT_MESSAGE_LIMIT,
+      publishLimit: SNAPSHOT_PUBLISH_LIMIT,
+      includeParamSuggestions: false
+    }));
   }
 
   function refreshSnapshot(): void {
-    snapshot.value = readSnapshot();
+    const next = readSnapshot();
+    const nextSig = snapshotSignature(next);
+    if (nextSig === lastSnapshotSig) return;
+    lastSnapshotSig = nextSig;
+    snapshot.value = next;
   }
 
   async function sleep(ms: number): Promise<void> {
@@ -390,7 +425,11 @@ export function useCloudPanel() {
     const started = Date.now();
     while (Date.now() - started <= timeoutMs) {
       const next = readSnapshot();
-      snapshot.value = next;
+      const nextSig = snapshotSignature(next);
+      if (nextSig !== lastSnapshotSig) {
+        lastSnapshotSig = nextSig;
+        snapshot.value = next;
+      }
       const result = predicate(next);
       if (result) return result;
       await sleep(intervalMs);
@@ -548,8 +587,24 @@ export function useCloudPanel() {
   }
 
   const currentConnection = computed(() => snapshot.value.connections.find((item) => item.id === snapshot.value.selectedConnectionId) || null);
-  const cloudMessages = computed(() => [...snapshot.value.messages].filter((row) => !!cloudMeta(row)).sort((a, b) => b.time - a.time));
-  const publishEntries = computed<PublishEntry[]>(() => [...snapshot.value.publishHistory].sort((a, b) => b.time - a.time).map((item) => ({ key: historyKey(item), item, meta: parsePublishMeta(item) })));
+  const cloudMessages = computed(() => {
+    const out: TimelineRow[] = [];
+    const rows = snapshot.value.messages;
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      const row = rows[i];
+      if (cloudMeta(row)) out.push(row);
+    }
+    return out;
+  });
+  const publishEntries = computed<PublishEntry[]>(() => {
+    const out: PublishEntry[] = [];
+    const rows = snapshot.value.publishHistory;
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      const item = rows[i];
+      out.push({ key: historyKey(item), item, meta: parsePublishMeta(item) });
+    }
+    return out;
+  });
 
   const airportOptions = computed(() => {
     const airportSet = new Set<string>();
@@ -580,10 +635,19 @@ export function useCloudPanel() {
 
   const visibleDroneOptions = computed(() => {
     if (airport.value === 'all') return allDroneOptions.value;
-    return allDroneOptions.value.filter((item) => publishEntries.value.some((entry) => entry.meta.airportSn === airport.value && entry.meta.droneSn === item) || cloudMessages.value.some((row) => {
+    const visible = new Set<string>();
+    publishEntries.value.forEach((entry) => {
+      if (entry.meta.airportSn === airport.value && looksLikeDroneSn(entry.meta.droneSn)) {
+        visible.add(entry.meta.droneSn);
+      }
+    });
+    cloudMessages.value.forEach((row) => {
       const meta = cloudMeta(row);
-      return meta?.airportSn === airport.value && meta.droneSn === item;
-    }));
+      if (meta?.airportSn === airport.value && looksLikeDroneSn(meta.droneSn)) {
+        visible.add(meta.droneSn);
+      }
+    });
+    return allDroneOptions.value.filter((item) => visible.has(item));
   });
 
   function syncAirportParamSuggestions(options: string[]): void {
@@ -640,14 +704,15 @@ export function useCloudPanel() {
   const relatedRows = computed(() => {
     const entry = selectedEntry.value;
     if (!entry) return [] as TimelineRow[];
-    return [...cloudMessages.value].filter((row) => {
+    const out: TimelineRow[] = [];
+    cloudMessages.value.forEach((row) => {
       const meta = cloudMeta(row);
-      if (!meta || row.time < entry.item.time) return false;
-      if (entry.meta.tid && meta.tid === entry.meta.tid) return true;
-      if (entry.meta.bid && meta.bid === entry.meta.bid) return true;
-      if (entry.meta.seq != null && meta.seq === entry.meta.seq) return true;
-      return false;
-    }).sort((a, b) => a.time - b.time);
+      if (!meta || row.time < entry.item.time) return;
+      if (entry.meta.tid && meta.tid === entry.meta.tid) out.push(row);
+      else if (entry.meta.bid && meta.bid === entry.meta.bid) out.push(row);
+      else if (entry.meta.seq != null && meta.seq === entry.meta.seq) out.push(row);
+    });
+    return out.reverse();
   });
 
   const callbackRows = computed(() => relatedRows.value.filter((row) => !!cloudMeta(row)?.isReply));
