@@ -546,6 +546,53 @@ function displayFieldValue(key, value, path, topicSn) {
     return raw;
 }
 
+function replyStatusFrom(body) {
+    const code = body.result ?? body.code ?? body.status;
+    if (code === true || code === 'success' || code === 'ok') return 'success';
+    if (code === false || code === 'error' || code === 'failed') return 'error';
+    if (typeof code === 'number') return code === 0 ? 'success' : 'error';
+    if (typeof code === 'string' && code.trim() !== '' && Number.isFinite(Number(code))) {
+        return Number(code) === 0 ? 'success' : 'error';
+    }
+    return 'info';
+}
+
+function pushReplyField(fields, label, value) {
+    if (value === undefined || value === null || value === '') return;
+    fields.push({ label, value: truncateVal(value, 160) });
+}
+
+function createReplyBlocks(body, meta) {
+    const isReply = !!meta?.isReply;
+    const isCommand = !!body?.method && (body.tid || body.bid);
+    if (!isReply && !isCommand) return [];
+    const fields = [];
+    pushReplyField(fields, 'method', body.method || meta.method);
+    pushReplyField(fields, 'tid', body.tid || meta.tid);
+    pushReplyField(fields, 'bid', body.bid || meta.bid);
+    pushReplyField(fields, 'timestamp', body.timestamp);
+    pushReplyField(fields, 'result', body.result);
+    pushReplyField(fields, 'code', body.code);
+    pushReplyField(fields, 'message', body.message || body.msg || body.status_reason);
+    pushReplyField(fields, 'output', body.output);
+    if (body.data && typeof body.data === 'object') {
+        for (const [key, value] of Object.entries(body.data).slice(0, 12)) {
+            if (value && typeof value === 'object') continue;
+            pushReplyField(fields, fieldLabel(key), value);
+        }
+    }
+    const status = isReply ? replyStatusFrom(body) : 'info';
+    const summary = isReply
+        ? (body.message || body.msg || body.status_reason || (status === 'success' ? '调用成功' : status === 'error' ? '调用失败' : '收到回执'))
+        : `发送后等待 ${body.method} 的 reply 回执`;
+    return [{
+        title: isReply ? 'Reply 回执' : 'Reply 预期回执',
+        status,
+        summary,
+        fields
+    }];
+}
+
 function collectFieldValues(input, path = '$.data', out = [], seen = new Set(), topicSn = '') {
     if (!input || typeof input !== 'object' || out.length >= 200) return out;
     if (seen.has(input)) return out;
@@ -974,10 +1021,12 @@ module.exports = {
         if (meta.airportSn) rememberParams.airportSn = meta.airportSn;
         if (meta.droneSn) rememberParams.droneSn = meta.droneSn;
         if (meta.gatewaySn) rememberParams.gateway = meta.gatewaySn;
+        const replyBlocks = createReplyBlocks(body, meta);
 
         return {
             summary: `${parts.join(' | ')} | ${sn}`,
             highlights,
+            ...(replyBlocks.length ? { replyBlocks } : {}),
             fieldValues,
             fieldLabels: fieldValues.map(({ path, key, label }) => ({ path, key, label })),
             topicLabel: `${icon} ${suffixLabel}`,
