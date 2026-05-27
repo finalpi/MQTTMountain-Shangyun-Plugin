@@ -754,7 +754,7 @@ export function useCloudPanel() {
       if (modules.size && !modules.has(item.module)) return false;
       if (start && item.endTime < start) return false;
       if (end && item.startTime > end) return false;
-      if (drone.value !== 'all' && item.deviceSn !== drone.value) return false;
+      if (drone.value !== 'all' && item.deviceSn !== drone.value && item.deviceSn !== airport.value) return false;
       return true;
     });
   });
