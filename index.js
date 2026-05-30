@@ -733,17 +733,18 @@ function findDebugStateField(input, seen = new Set()) {
 
 function inferDebugState(body) {
     const modeCode = findModeCode(body);
-    if (modeCode != null) {
+    if (modeCode === 2) {
         return {
-            state: modeCode === 2 ? 'enabled' : 'disabled',
+            state: 'enabled',
             source: 'mode_code',
             modeCode
         };
     }
     const fromField = findDebugStateField(body);
-    if (fromField) return fromField;
-    if (body.method === 'debug_mode_open') return { state: 'enabled', source: 'method' };
-    if (body.method === 'debug_mode_close') return { state: 'disabled', source: 'method' };
+    if (fromField) return { ...fromField, modeCode: modeCode ?? undefined };
+    if (body.method === 'debug_mode_open') return { state: 'enabled', source: 'method', modeCode: modeCode ?? undefined };
+    if (body.method === 'debug_mode_close') return { state: 'disabled', source: 'method', modeCode: modeCode ?? undefined };
+    if (modeCode != null) return { modeCode };
     return null;
 }
 
