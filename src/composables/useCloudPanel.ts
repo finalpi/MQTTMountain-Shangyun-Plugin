@@ -7,6 +7,8 @@ import type {
   PublishEntry,
   PublishHistoryRow,
   PublishMeta,
+  StickChannels,
+  StickVector,
   TimelineRow,
   UploadProgressRow
 } from '../types/panel';
@@ -29,6 +31,19 @@ const OSS_STORAGE_KEY = 'mm.plugin.dji.oss-profiles.v1';
 const SELECTION_STORAGE_KEY = 'mm.plugin.dji.selection.v1';
 const SNAPSHOT_MESSAGE_LIMIT = 5000;
 const SNAPSHOT_PUBLISH_LIMIT = 50;
+const STICK_NEUTRAL = 1024;
+const STICK_MIN = 364;
+const STICK_MAX = 1684;
+const STICK_SPAN = 660;
+const STICK_DEAD_ZONE = 0.08;
+
+const NEUTRAL_STICK_VECTOR: StickVector = {
+  roll: 0,
+  pitch: 0,
+  throttle: 0,
+  yaw: 0,
+  gimbalPitch: 0
+};
 
 function debugProfileLog(label: string, payload: unknown): void {
   console.log(`[cloud-panel][profiles] ${label}`, payload);
@@ -63,6 +78,30 @@ function pickAirportSn(...values: unknown[]): string | undefined {
 
 function pickDroneSn(...values: unknown[]): string | undefined {
   return values.find((value) => looksLikeDroneSn(value)) as string | undefined;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function normalizedAxis(value: number): number {
+  if (!Number.isFinite(value) || Math.abs(value) < STICK_DEAD_ZONE) return 0;
+  return clamp(value, -1, 1);
+}
+
+function vectorToChannels(vector: StickVector): StickChannels {
+  const channel = (value: number) => clamp(
+    Math.round(STICK_NEUTRAL + normalizedAxis(value) * STICK_SPAN),
+    STICK_MIN,
+    STICK_MAX
+  );
+  return {
+    roll: channel(vector.roll),
+    pitch: channel(vector.pitch),
+    throttle: channel(vector.throttle),
+    yaw: channel(vector.yaw),
+    gimbal_pitch: channel(vector.gimbalPitch)
+  };
 }
 
 function normalizeProfile(input: Partial<OssProfile>, usedNames: string[], usedIds: Set<string>): OssProfile {
@@ -140,6 +179,15 @@ export function useCloudPanel() {
     access_key_secret: '',
     security_token: ''
   });
+  const remoteControlArmed = ref(false);
+  const stickRateHz = ref(5);
+  const stickState = reactive<StickVector>({ ...NEUTRAL_STICK_VECTOR });
+  const cameraPayloadIndex = ref('99-0-0');
+  const cameraLocked = ref(true);
+  const cameraMaxPitchSpeed = ref(40);
+  const cameraMaxYawSpeed = ref(40);
+  const remoteLastPayload = ref('');
+  const remoteFeedback = ref('');
 
   let profileFormSyncing = false;
   let profilesReady = false;
@@ -151,6 +199,11 @@ export function useCloudPanel() {
   function setFeedback(text: string, tone: 'info' | 'error' = 'info'): void {
     feedback.value = text;
     feedbackTone.value = tone;
+  }
+
+  function setRemoteFeedback(text: string, tone: 'info' | 'error' = 'info'): void {
+    remoteFeedback.value = text;
+    setFeedback(text, tone);
   }
 
   function selectionStorageKey(): string {
@@ -405,7 +458,7 @@ export function useCloudPanel() {
     return normalizeSnapshot(bridge.getSnapshot({
       messageLimit: SNAPSHOT_MESSAGE_LIMIT,
       publishLimit: SNAPSHOT_PUBLISH_LIMIT,
-      includeParamSuggestions: false
+      includeParamSuggestions: true
     }));
   }
 
@@ -547,6 +600,19 @@ export function useCloudPanel() {
     }, timeoutMs, 1000);
   }
 
+  async function publishDrc(method: string, airportSn: string, data: Record<string, unknown>): Promise<{ time: number }> {
+    if (!bridge || typeof bridge.publish !== 'function') throw new Error('宿主发布能力不可用');
+    const time = Date.now();
+    const topic = `thing/product/${airportSn}/drc/down`;
+    const payload = JSON.stringify({ method, data });
+    remoteLastPayload.value = payload;
+    const result = await bridge.publish({ topic, payload, qos: 1, retain: false });
+    if (!result || !result.success) throw new Error(result?.message || `${method} 发布失败`);
+    selectedHistoryKey.value = historyKey({ topic, payload, time: result.time || time });
+    refreshSnapshot();
+    return { time: result.time || time };
+  }
+
   async function publishService(method: string, airportSn: string, data?: Record<string, unknown>): Promise<{ time: number; ids: { tid: string; bid: string } }> {
     if (!bridge || typeof bridge.publish !== 'function') throw new Error('宿主发布能力不可用');
     const time = Date.now();
@@ -563,6 +629,7 @@ export function useCloudPanel() {
     if (data && Object.keys(data).length) body.data = data;
     const topic = `thing/product/${airportSn}/services`;
     const payload = JSON.stringify(body);
+    remoteLastPayload.value = payload;
     const result = await bridge.publish({ topic, payload, qos: 1, retain: false });
     if (!result || !result.success) throw new Error(result?.message || `${method} 发布失败`);
     selectedHistoryKey.value = historyKey({ topic, payload, time: result.time || time });
@@ -670,7 +737,10 @@ export function useCloudPanel() {
   }, { immediate: true });
 
   watch(airport, (value) => {
-    if (value === 'all') return;
+    if (value === 'all') {
+      remoteControlArmed.value = false;
+      return;
+    }
     syncAirportParamSuggestions(airportOptions.value);
     saveSelection();
   });
@@ -744,6 +814,38 @@ export function useCloudPanel() {
   const airportOnline = computed(() => latestOsdStatus('airport', airport.value));
   const droneOnline = computed(() => latestOsdStatus('drone', drone.value));
   const canOperate = computed(() => !!snapshot.value.selectedConnectionId && snapshot.value.selectedConnectionState === 'connected' && airport.value !== 'all' && !actionBusy.value);
+  const canRemoteOperate = computed(() => canOperate.value && remoteControlArmed.value);
+  const stickChannels = computed(() => vectorToChannels(stickState));
+  const cameraPayloadIndexOptions = computed(() => {
+    const keys = [
+      `cameraPayloadIndexes:${airport.value}`,
+      `payloadIndexes:${airport.value}`,
+      `liveVideoIds:${airport.value}`
+    ];
+    const out: string[] = [];
+    for (const key of keys) {
+      const values = snapshot.value.paramSuggestions[key];
+      if (!Array.isArray(values)) continue;
+      values.forEach((value) => {
+        const text = String(value || '').trim();
+        if (!text) return;
+        const parts = text.split('/');
+        const payloadIndex = parts.length >= 2 ? parts[1] : text;
+        if (payloadIndex && !out.includes(payloadIndex)) out.push(payloadIndex);
+      });
+    }
+    if (cameraPayloadIndex.value && !out.includes(cameraPayloadIndex.value)) out.unshift(cameraPayloadIndex.value);
+    return out;
+  });
+
+  watch(cameraPayloadIndexOptions, (options) => {
+    if (!cameraPayloadIndex.value && options[0]) cameraPayloadIndex.value = options[0];
+  }, { immediate: true });
+
+  watch(canOperate, (value) => {
+    if (!value) remoteControlArmed.value = false;
+  });
+
   const debugToggleLabel = computed(() => actionBusy.value ? '处理中...' : debugStatus.value.state === 'enabled' ? '关闭 Debug' : '开启 Debug');
 
   const filteredLogRows = computed(() => {
@@ -841,6 +943,62 @@ export function useCloudPanel() {
     setFeedback('重启注册上线流程已完成');
   }
 
+  async function publishStickControl(vector: StickVector = stickState): Promise<void> {
+    if (airport.value === 'all') throw new Error('请先选择机场');
+    if (!remoteControlArmed.value) throw new Error('请先解锁遥控控制');
+    const channels = vectorToChannels(vector);
+    Object.assign(stickState, vector);
+    await publishDrc('stick_control', airport.value, { ...channels });
+    setRemoteFeedback(`已发送 stick_control ${channels.roll}/${channels.pitch}/${channels.throttle}/${channels.yaw}/${channels.gimbal_pitch}`);
+  }
+
+  async function sendStickNeutral(force = false): Promise<void> {
+    if (airport.value === 'all') throw new Error('请先选择机场');
+    if (!force && !remoteControlArmed.value) throw new Error('请先解锁遥控控制');
+    Object.assign(stickState, NEUTRAL_STICK_VECTOR);
+    const channels = vectorToChannels(NEUTRAL_STICK_VECTOR);
+    await publishDrc('stick_control', airport.value, { ...channels });
+    setRemoteFeedback('已发送摇杆归中');
+  }
+
+  async function sendCameraScreenDrag(vector: { dx: number; dy: number }): Promise<void> {
+    if (airport.value === 'all') throw new Error('请先选择机场');
+    if (!remoteControlArmed.value) throw new Error('请先解锁遥控控制');
+    const payloadIndex = cameraPayloadIndex.value.trim() || '99-0-0';
+    const data = {
+      payload_index: payloadIndex,
+      locked: cameraLocked.value,
+      pitch_speed: Number((-clamp(vector.dy, -1, 1) * cameraMaxPitchSpeed.value).toFixed(6)),
+      yaw_speed: Number((clamp(vector.dx, -1, 1) * cameraMaxYawSpeed.value).toFixed(6))
+    };
+    await publishService('camera_screen_drag', airport.value, data);
+    setRemoteFeedback(`已发送画面拖动 pitch=${data.pitch_speed} yaw=${data.yaw_speed}`);
+  }
+
+  async function stopCameraScreenDrag(force = false): Promise<void> {
+    if (airport.value === 'all') throw new Error('请先选择机场');
+    if (!force && !remoteControlArmed.value) throw new Error('请先解锁遥控控制');
+    const payloadIndex = cameraPayloadIndex.value.trim() || '99-0-0';
+    await publishService('camera_screen_drag', airport.value, {
+      payload_index: payloadIndex,
+      locked: cameraLocked.value,
+      pitch_speed: 0,
+      yaw_speed: 0
+    });
+    setRemoteFeedback('已发送画面拖动停止');
+  }
+
+  async function emergencyRemoteStop(): Promise<void> {
+    const wasArmed = remoteControlArmed.value;
+    if (!wasArmed) remoteControlArmed.value = true;
+    try {
+      await sendStickNeutral(true);
+      await stopCameraScreenDrag(true);
+    } finally {
+      remoteControlArmed.value = false;
+    }
+  }
+
   async function queryDeviceLogs(): Promise<void> {
     if (airport.value === 'all') throw new Error('请先选择机场');
     const modules = selectedModules();
@@ -929,6 +1087,7 @@ export function useCloudPanel() {
 
   onBeforeUnmount(() => {
     if (refreshTimer != null) window.clearInterval(refreshTimer);
+    remoteControlArmed.value = false;
   });
 
   return {
@@ -961,6 +1120,18 @@ export function useCloudPanel() {
     airportOnline,
     droneOnline,
     canOperate,
+    canRemoteOperate,
+    remoteControlArmed,
+    stickRateHz,
+    stickState,
+    stickChannels,
+    cameraPayloadIndex,
+    cameraPayloadIndexOptions,
+    cameraLocked,
+    cameraMaxPitchSpeed,
+    cameraMaxYawSpeed,
+    remoteLastPayload,
+    remoteFeedback,
     debugToggleLabel,
     filteredLogRows,
     selectedLogCount,
@@ -977,6 +1148,11 @@ export function useCloudPanel() {
     runAction,
     toggleDebug,
     restartBootstrap,
+    publishStickControl,
+    sendStickNeutral,
+    sendCameraScreenDrag,
+    stopCameraScreenDrag,
+    emergencyRemoteStop,
     queryDeviceLogs,
     selectAllLogs,
     clearLogSelection,

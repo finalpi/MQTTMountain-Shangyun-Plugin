@@ -104,3 +104,24 @@ export interface UploadProgressRow {
   result: number;
   time: number;
 }
+
+export interface StickVector {
+  roll: number;
+  pitch: number;
+  throttle: number;
+  yaw: number;
+  gimbalPitch: number;
+}
+
+export interface StickChannels {
+  roll: number;
+  pitch: number;
+  throttle: number;
+  yaw: number;
+  gimbal_pitch: number;
+}
+
+export interface CameraDragVector {
+  dx: number;
+  dy: number;
+}

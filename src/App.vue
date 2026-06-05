@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import type { OssProfile } from './types/panel';
 import PanelHeader from './components/PanelHeader.vue';
+import RemoteControlWorkspace from './components/RemoteControlWorkspace.vue';
 import LogWorkspace from './components/LogWorkspace.vue';
 import HistoryWorkspace from './components/HistoryWorkspace.vue';
 import { useCloudPanel } from './composables/useCloudPanel';
@@ -38,6 +39,18 @@ const {
   airportOnline,
   droneOnline,
   canOperate,
+  canRemoteOperate,
+  remoteControlArmed,
+  stickRateHz,
+  stickState,
+  stickChannels,
+  cameraPayloadIndex,
+  cameraPayloadIndexOptions,
+  cameraLocked,
+  cameraMaxPitchSpeed,
+  cameraMaxYawSpeed,
+  remoteLastPayload,
+  remoteFeedback,
   debugToggleLabel,
   filteredLogRows,
   selectedLogCount,
@@ -53,6 +66,11 @@ const {
   runAction,
   toggleDebug,
   restartBootstrap,
+  publishStickControl,
+  sendStickNeutral,
+  sendCameraScreenDrag,
+  stopCameraScreenDrag,
+  emergencyRemoteStop,
   queryDeviceLogs,
   selectAllLogs,
   clearLogSelection,
@@ -121,6 +139,38 @@ onBeforeUnmount(() => {
       @update:drone="drone = $event"
       @toggle-debug="runAction(toggleDebug)"
       @restart-bootstrap="runAction(restartBootstrap)"
+    />
+
+    <RemoteControlWorkspace
+      :can-operate="canOperate"
+      :can-remote-operate="canRemoteOperate"
+      :remote-control-armed="remoteControlArmed"
+      :stick-rate-hz="stickRateHz"
+      :stick-state="stickState"
+      :stick-channels="stickChannels"
+      :camera-payload-index="cameraPayloadIndex"
+      :camera-payload-index-options="cameraPayloadIndexOptions"
+      :camera-locked="cameraLocked"
+      :camera-max-pitch-speed="cameraMaxPitchSpeed"
+      :camera-max-yaw-speed="cameraMaxYawSpeed"
+      :remote-last-payload="remoteLastPayload"
+      :remote-feedback="remoteFeedback"
+      :airport="airport"
+      :drone="drone"
+      :airport-online-text="airportOnline.text"
+      :drone-online-text="droneOnline.text"
+      :debug-state="debugStatus.state"
+      @update:remote-control-armed="remoteControlArmed = $event"
+      @update:stick-rate-hz="stickRateHz = $event"
+      @update:camera-payload-index="cameraPayloadIndex = $event"
+      @update:camera-locked="cameraLocked = $event"
+      @update:camera-max-pitch-speed="cameraMaxPitchSpeed = $event"
+      @update:camera-max-yaw-speed="cameraMaxYawSpeed = $event"
+      @publish-stick="publishStickControl"
+      @send-neutral="sendStickNeutral"
+      @camera-drag="sendCameraScreenDrag"
+      @stop-camera-drag="stopCameraScreenDrag"
+      @remote-stop="emergencyRemoteStop"
     />
 
     <LogWorkspace

@@ -45,11 +45,19 @@ https://github.com/finalpi/MQTTMountain-Shangyun-Plugin.git
 - 🔄 机场重启 / 🔁 飞机重启
 - 🗑️ 机场格式化 / 🗑️ 飞机格式化
 
+**指令飞行**
+- 🚀 `takeoff_to_point` 一键起飞到目标点（目标经纬高、安全起飞高度、返航高度、失控动作等）
+- 🎯 `fly_to_point` 飞向目标点（单目标点、最大速度、任务 UUID）
+- 🏠 `return_home` 一键返航
+- 目标纬度旁的「机场位置+30m」按钮会把目标经纬度填成当前选择机场的位置，并把目标高度填成机场椭球高 + 30m（需先收到该机场包含 `latitude` / `longitude` / `height` 的 state 或 osd 消息）
+
 **直播**
-- 📹 开始直播推流 / ⏹️ 停止直播推流
+- 📹 `live_start_push` 开始直播推流（RTMP / Agora / GB28181 / WebRTC 参数）
+- ⏹️ `live_stop_push` 停止直播推流
+- 收到机场 `live_status` / `live_capacity` 后会按机场缓存可用 `video_id`，开始/停止直播模板会根据当前 `gateway` 提供视频流下拉选择
 
 所有模板都需要填入：
-- `sn`：机场 SN，例 `8UUXNCJ00A0XWG`
+- `gateway` / 机场 SN，例 `8UUXNCJ00A0XWG`
 - `tid` / `bid`：会自动生成 UUID（你也可以覆盖）
 - `timestamp`：自动填当前毫秒（你也可以覆盖）
 

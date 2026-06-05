@@ -308,7 +308,15 @@ const DOCK2_FIELD_LABEL = {
 const FIELD_LABEL = {
     ...DOCK3_FIELD_LABEL,
     ...AIRCRAFT_M3D_FIELD_LABEL,
-    ...DOCK2_FIELD_LABEL
+    ...DOCK2_FIELD_LABEL,
+    roll: '横滚通道',
+    pitch: '俯仰通道',
+    throttle: '油门通道',
+    yaw: '偏航通道',
+    gimbal_pitch: '云台俯仰通道',
+    locked: '机头/云台锁定',
+    pitch_speed: '云台 pitch 速度',
+    yaw_speed: '云台 yaw 速度'
 };
 
 const DEBUG_STATE_KEYS = [
@@ -444,6 +452,9 @@ const AIRCRAFT_M3D_FIELD_SPEC = {
     commander_flight_mode: { enum: { 0: '最优高度飞行', 1: '预设高度飞行' } },
     commander_mode_lost_action: { enum: { 0: '继续指点飞行任务', 1: '退出指点飞行并执行常规失控行为' } },
     global_enable: { enum: COMMON_ENUM_LABEL },
+    locked: { enum: COMMON_ENUM_LABEL },
+    pitch_speed: { unit: 'rad/s' },
+    yaw_speed: { unit: 'rad/s' },
     drone_type_enable: { enum: COMMON_ENUM_LABEL },
     drone_sn_enable: { enum: COMMON_ENUM_LABEL },
     datetime_enable: { enum: COMMON_ENUM_LABEL },
@@ -620,6 +631,199 @@ function firstString(...values) {
     return undefined;
 }
 
+function firstFiniteNumber(...values) {
+    for (const value of values) {
+        if (typeof value === 'number' && Number.isFinite(value)) return value;
+        if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+    }
+    return undefined;
+}
+
+function parseParamSuggestions(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) return {};
+    try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function firstSuggestion(suggestions, key) {
+    const list = suggestions && Array.isArray(suggestions[key]) ? suggestions[key] : [];
+    return firstString(...list);
+}
+
+function airportPositionKey(sn) {
+    return `airportPosition:${sn}`;
+}
+
+function airportPropsKey(sn) {
+    return `airportProps:${sn}`;
+}
+
+function airportPropKey(sn, key) {
+    return `airportProp:${sn}:${key}`;
+}
+
+function liveVideoIdsKey(sn) {
+    return `liveVideoIds:${sn}`;
+}
+
+function payloadIndexesKey(sn) {
+    return `payloadIndexes:${sn}`;
+}
+
+function cameraPayloadIndexesKey(sn) {
+    return `cameraPayloadIndexes:${sn}`;
+}
+
+const AIRPORT_CACHE_KEYS = [
+    'latitude', 'longitude', 'height', 'mode_code', 'flighttask_step_code',
+    'drone_in_dock', 'drone_charge_state', 'cover_state', 'putter_state',
+    'supplement_light_state', 'emergency_stop_state', 'alarm_state',
+    'wind_speed', 'rainfall', 'environment_temperature', 'environment_humidity',
+    'temperature', 'humidity', 'battery_store_mode', 'network_state',
+    'wireless_link', 'position_state', 'sub_device', 'live_status', 'live_capacity'
+];
+
+function parseAirportPosition(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    try {
+        const parsed = JSON.parse(raw);
+        const latitude = firstFiniteNumber(parsed?.latitude);
+        const longitude = firstFiniteNumber(parsed?.longitude);
+        const height = firstFiniteNumber(parsed?.height);
+        if (latitude == null || longitude == null || height == null) return null;
+        return { latitude, longitude, height };
+    } catch {
+        return null;
+    }
+}
+
+function airportPositionFromProps(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    try {
+        const parsed = JSON.parse(raw);
+        const latitude = firstFiniteNumber(parsed?.latitude);
+        const longitude = firstFiniteNumber(parsed?.longitude);
+        const height = firstFiniteNumber(parsed?.height);
+        if (latitude == null || longitude == null || height == null) return null;
+        return { latitude, longitude, height };
+    } catch {
+        return null;
+    }
+}
+
+function airportPositionFromPropCache(suggestions, gateway) {
+    const latitude = firstFiniteNumber(firstSuggestion(suggestions, airportPropKey(gateway, 'latitude')));
+    const longitude = firstFiniteNumber(firstSuggestion(suggestions, airportPropKey(gateway, 'longitude')));
+    const height = firstFiniteNumber(firstSuggestion(suggestions, airportPropKey(gateway, 'height')));
+    if (latitude == null || longitude == null || height == null) return null;
+    return { latitude, longitude, height };
+}
+
+function pickAirportProps(data) {
+    if (!data || typeof data !== 'object') return null;
+    const props = {};
+    for (const key of AIRPORT_CACHE_KEYS) {
+        if (!Object.prototype.hasOwnProperty.call(data, key)) continue;
+        const value = data[key];
+        if (value == null) continue;
+        props[key] = value;
+    }
+    return Object.keys(props).length ? props : null;
+}
+
+function pushUnique(list, value) {
+    if (typeof value !== 'string') return;
+    const text = value.trim();
+    if (!text || list.includes(text)) return;
+    list.push(text);
+}
+
+function collectPayloadIndexes(data, out = [], seen = new Set()) {
+    if (!data || typeof data !== 'object' || seen.has(data)) return out;
+    seen.add(data);
+    if (Array.isArray(data)) {
+        data.slice(0, 100).forEach((item) => collectPayloadIndexes(item, out, seen));
+        return out;
+    }
+    pushUnique(out, firstString(data.payload_index, data.payloadIndex, data.camera_index, data.cameraIndex, data.type_subtype_gimbalindex));
+    for (const value of Object.values(data)) {
+        if (value && typeof value === 'object') collectPayloadIndexes(value, out, seen);
+    }
+    return out;
+}
+
+function collectLiveVideoIds(data) {
+    const out = [];
+    if (!data || typeof data !== 'object') return out;
+
+    if (Array.isArray(data.live_status)) {
+        for (const item of data.live_status) {
+            pushUnique(out, firstString(item?.video_id, item?.videoId));
+        }
+    }
+
+    const capacity = data.live_capacity && typeof data.live_capacity === 'object' ? data.live_capacity : null;
+    const devices = Array.isArray(capacity?.device_list) ? capacity.device_list : [];
+    for (const device of devices) {
+        const deviceSn = firstString(device?.sn, device?.device_sn, device?.deviceSn);
+        const cameras = Array.isArray(device?.camera_list) ? device.camera_list : [];
+        for (const camera of cameras) {
+            const cameraIndex = firstString(camera?.camera_index, camera?.cameraIndex, camera?.payload_index, camera?.payloadIndex);
+            const videos = Array.isArray(camera?.video_list) ? camera.video_list : [];
+            for (const video of videos) {
+                pushUnique(out, firstString(video?.video_id, video?.videoId));
+                const videoIndex = firstString(video?.video_index, video?.videoIndex);
+                if (deviceSn && cameraIndex && videoIndex) pushUnique(out, `${deviceSn}/${cameraIndex}/${videoIndex}`);
+            }
+        }
+    }
+
+    return out;
+}
+
+function targetHeightFromAirport(height) {
+    return Number((height + 30).toFixed(3));
+}
+
+function airportPositionFill(request) {
+    const params = request?.params || {};
+    const suggestions = parseParamSuggestions(params.__paramSuggestions);
+    const gateway = firstString(
+        params.gateway,
+        params.airportSn,
+        params.sn,
+        firstSuggestion(suggestions, 'gateway'),
+        firstSuggestion(suggestions, 'airportSn'),
+        firstSuggestion(suggestions, 'sn')
+    );
+    if (!gateway) throw new Error('请先选择或填写机场 SN');
+
+    const position = parseAirportPosition(firstSuggestion(suggestions, airportPositionKey(gateway)))
+        || airportPositionFromProps(firstSuggestion(suggestions, airportPropsKey(gateway)))
+        || airportPositionFromPropCache(suggestions, gateway);
+    if (!position) {
+        throw new Error(`未找到机场 ${gateway} 的经纬高，请先接收该机场包含 latitude / longitude / height 的 state 或 osd 消息`);
+    }
+
+    const targetHeight = targetHeightFromAirport(position.height);
+    if (request.senderId === 'drc.takeoff_to_point' || Object.prototype.hasOwnProperty.call(params, 'target_latitude')) {
+        return {
+            target_latitude: position.latitude,
+            target_longitude: position.longitude,
+            target_height: targetHeight
+        };
+    }
+    return {
+        latitude: position.latitude,
+        longitude: position.longitude,
+        height: targetHeight
+    };
+}
+
 function looksLikeAirportSn(value) {
     return typeof value === 'string' && /^[A-Z0-9]{14}$/.test(value.trim());
 }
@@ -637,6 +841,8 @@ function extractDataHighlights(data, topicSn = '') {
         'latitude', 'longitude', 'height', 'elevation', 'horizontal_speed', 'vertical_speed',
         'battery', 'capacity_percent', 'remain_flight_time', 'home_distance',
         'attitude_head', 'attitude_roll', 'attitude_pitch',
+        'roll', 'pitch', 'throttle', 'yaw', 'gimbal_pitch',
+        'payload_index', 'locked', 'pitch_speed', 'yaw_speed',
         'job_number', 'temperature', 'working_voltage', 'electric_supply_voltage',
         'cover_state', 'drone_in_dock', 'drone_charge_state', 'alarm_state',
         'environment_temperature', 'environment_humidity', 'wind_speed', 'rainfall',
@@ -892,6 +1098,231 @@ function createReturnHomeSender() {
     };
 }
 
+function renderPayloadTemplate(payload, numericKeys = []) {
+    let template = JSON.stringify(payload).replace('"{ts}__NUM__"', '{ts}');
+    for (const key of numericKeys) {
+        template = template.replaceAll(`"{${key}}__NUM__"`, `{${key}}`);
+    }
+    return template;
+}
+
+function createTakeoffToPointSender() {
+    const uuid = crypto.randomUUID();
+    const flightId = crypto.randomUUID();
+    const now = Date.now();
+    return {
+        id: 'drc.takeoff_to_point',
+        name: '一键起飞到目标点',
+        group: '指令飞行',
+        topic: 'thing/product/{gateway}/services',
+        payloadTemplate: renderPayloadTemplate({
+            tid: '{tid}',
+            bid: '{bid}',
+            timestamp: '{ts}__NUM__',
+            method: 'takeoff_to_point',
+            data: {
+                target_latitude: '{target_latitude}__NUM__',
+                target_longitude: '{target_longitude}__NUM__',
+                target_height: '{target_height}__NUM__',
+                security_takeoff_height: '{security_takeoff_height}__NUM__',
+                rth_altitude: '{rth_altitude}__NUM__',
+                rc_lost_action: '{rc_lost_action}__NUM__',
+                commander_mode_lost_action: '{commander_mode_lost_action}__NUM__',
+                commander_flight_height: '{commander_flight_height}__NUM__',
+                flight_id: '{flight_id}',
+                max_speed: '{max_speed}__NUM__'
+            }
+        }, [
+            'target_latitude', 'target_longitude', 'target_height', 'security_takeoff_height',
+            'rth_altitude', 'rc_lost_action', 'commander_mode_lost_action', 'commander_flight_height', 'max_speed'
+        ]),
+        qos: 1,
+        params: [
+            { key: 'gateway', label: '机场 SN', required: true, placeholder: '例如 5YSZK8Q00200T9' },
+            { key: 'target_latitude', label: '目标纬度', type: 'number', required: true, placeholder: '例如 31.230416', actions: [airportPositionAction()] },
+            { key: 'target_longitude', label: '目标经度', type: 'number', required: true, placeholder: '例如 121.473701' },
+            { key: 'target_height', label: '目标椭球高（m）', type: 'number', required: true, default: 100 },
+            { key: 'security_takeoff_height', label: '安全起飞高度（m）', type: 'number', required: true, default: 100 },
+            { key: 'rth_altitude', label: '返航高度（m）', type: 'number', required: true, default: 100 },
+            { key: 'rc_lost_action', label: '遥控器失控动作', type: 'number', default: 0, placeholder: '0 悬停 / 1 降落 / 2 返航' },
+            { key: 'commander_mode_lost_action', label: '指点飞行失控动作', type: 'number', default: 1, placeholder: '0 继续 / 1 退出' },
+            { key: 'commander_flight_height', label: '指点飞行高度（m）', type: 'number', required: true, default: 80 },
+            { key: 'max_speed', label: '最大速度（m/s）', type: 'number', default: 12 },
+            uuidParam('flight_id', flightId),
+            uuidParam('tid', uuid),
+            uuidParam('bid', uuid),
+            timestampParam(now)
+        ]
+    };
+}
+
+function airportPositionAction() {
+    return { id: 'airportPositionPlus30', label: '机场位置+30m' };
+}
+
+function createFlyToPointSender() {
+    const uuid = crypto.randomUUID();
+    const flyToId = crypto.randomUUID();
+    const now = Date.now();
+    return {
+        id: 'drc.fly_to_point',
+        name: '飞向目标点',
+        group: '指令飞行',
+        topic: 'thing/product/{gateway}/services',
+        payloadTemplate: renderPayloadTemplate({
+            tid: '{tid}',
+            bid: '{bid}',
+            timestamp: '{ts}__NUM__',
+            method: 'fly_to_point',
+            data: {
+                fly_to_id: '{fly_to_id}',
+                max_speed: '{max_speed}__NUM__',
+                points: [{
+                    latitude: '{latitude}__NUM__',
+                    longitude: '{longitude}__NUM__',
+                    height: '{height}__NUM__'
+                }]
+            }
+        }, ['max_speed', 'latitude', 'longitude', 'height']),
+        qos: 1,
+        params: [
+            { key: 'gateway', label: '机场 SN', required: true, placeholder: '例如 5YSZK8Q00200T9' },
+            { key: 'latitude', label: '目标纬度', type: 'number', required: true, placeholder: '例如 31.230416', actions: [airportPositionAction()] },
+            { key: 'longitude', label: '目标经度', type: 'number', required: true, placeholder: '例如 121.473701' },
+            { key: 'height', label: '目标椭球高（m）', type: 'number', required: true, default: 100 },
+            { key: 'max_speed', label: '最大速度（m/s）', type: 'number', default: 12 },
+            uuidParam('fly_to_id', flyToId),
+            uuidParam('tid', uuid),
+            uuidParam('bid', uuid),
+            timestampParam(now)
+        ]
+    };
+}
+
+function createLiveStartPushSender() {
+    const uuid = crypto.randomUUID();
+    const now = Date.now();
+    return {
+        id: 'live.start_push',
+        name: '开始直播推流',
+        group: '直播',
+        topic: 'thing/product/{gateway}/services',
+        payloadTemplate: renderPayloadTemplate({
+            tid: '{tid}',
+            bid: '{bid}',
+            timestamp: '{ts}__NUM__',
+            method: 'live_start_push',
+            data: {
+                url_type: '{url_type}__NUM__',
+                url: '{url}',
+                video_id: '{video_id}',
+                video_quality: '{video_quality}__NUM__'
+            }
+        }, ['url_type', 'video_quality']),
+        qos: 1,
+        params: [
+            { key: 'gateway', label: '机场 SN', required: true, placeholder: '例如 5YSZK8Q00200T9' },
+            { key: 'url_type', label: '直播协议类型', type: 'number', default: 1, placeholder: '0 Agora / 1 RTMP / 3 GB28181 / 4 WebRTC' },
+            { key: 'url', label: '直播参数', required: true, placeholder: '例如 rtmp://192.168.1.1:8080/live' },
+            { key: 'video_id', label: '视频流 ID', required: true, placeholder: '例如 1ZNDH1D0010098/39-0-7/normal-0', suggestionKeys: ['liveVideoIds:{gateway}'] },
+            { key: 'video_quality', label: '直播质量', type: 'number', default: 0, placeholder: '0 自适应 / 1 流畅 / 2 标清 / 3 高清 / 4 超清' },
+            uuidParam('tid', uuid),
+            uuidParam('bid', uuid),
+            timestampParam(now)
+        ]
+    };
+}
+
+function createLiveStopPushSender() {
+    const uuid = crypto.randomUUID();
+    const now = Date.now();
+    return {
+        id: 'live.stop_push',
+        name: '停止直播推流',
+        group: '直播',
+        topic: 'thing/product/{gateway}/services',
+        payloadTemplate: JSON.stringify({
+            tid: '{tid}',
+            bid: '{bid}',
+            timestamp: '{ts}__NUM__',
+            method: 'live_stop_push',
+            data: {
+                video_id: '{video_id}'
+            }
+        }).replace('"{ts}__NUM__"', '{ts}'),
+        qos: 1,
+        params: [
+            { key: 'gateway', label: '机场 SN', required: true, placeholder: '例如 5YSZK8Q00200T9' },
+            { key: 'video_id', label: '视频流 ID', required: true, placeholder: '例如 1ZNDH1D0010098/39-0-7/normal-0', suggestionKeys: ['liveVideoIds:{gateway}'] },
+            uuidParam('tid', uuid),
+            uuidParam('bid', uuid),
+            timestampParam(now)
+        ]
+    };
+}
+
+function createStickControlSender() {
+    return {
+        id: 'drc.stick_control',
+        name: '摇杆控制 stick_control',
+        group: '遥控指令',
+        topic: 'thing/product/{airportSn}/drc/down',
+        payloadTemplate: renderPayloadTemplate({
+            method: 'stick_control',
+            data: {
+                roll: '{roll}__NUM__',
+                pitch: '{pitch}__NUM__',
+                throttle: '{throttle}__NUM__',
+                yaw: '{yaw}__NUM__',
+                gimbal_pitch: '{gimbal_pitch}__NUM__'
+            }
+        }, ['roll', 'pitch', 'throttle', 'yaw', 'gimbal_pitch']),
+        qos: 1,
+        params: [
+            { key: 'airportSn', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' },
+            { key: 'roll', label: 'roll 横滚', type: 'number', default: 1024, placeholder: '364-1684，1024 中位' },
+            { key: 'pitch', label: 'pitch 俯仰', type: 'number', default: 1024, placeholder: '364-1684，1024 中位' },
+            { key: 'throttle', label: 'throttle 油门', type: 'number', default: 1024, placeholder: '364-1684，1024 中位' },
+            { key: 'yaw', label: 'yaw 偏航', type: 'number', default: 1024, placeholder: '364-1684，1024 中位' },
+            { key: 'gimbal_pitch', label: 'gimbal_pitch 云台俯仰', type: 'number', default: 1024, placeholder: '364-1684，1024 中位' }
+        ]
+    };
+}
+
+function createCameraScreenDragSender() {
+    const uuid = crypto.randomUUID();
+    const now = Date.now();
+    return {
+        id: 'payload.camera_screen_drag',
+        name: '画面拖动控制',
+        group: '负载控制',
+        topic: 'thing/product/{gateway}/services',
+        payloadTemplate: renderPayloadTemplate({
+            tid: '{tid}',
+            bid: '{bid}',
+            timestamp: '{ts}__NUM__',
+            method: 'camera_screen_drag',
+            data: {
+                payload_index: '{payload_index}',
+                locked: '{locked}__BOOL__',
+                pitch_speed: '{pitch_speed}__NUM__',
+                yaw_speed: '{yaw_speed}__NUM__'
+            }
+        }, ['pitch_speed', 'yaw_speed']).replace('"{locked}__BOOL__"', '{locked}'),
+        qos: 1,
+        params: [
+            { key: 'gateway', label: '机场 SN', required: true, placeholder: '例如 8UUXNCJ00A0XWG' },
+            { key: 'payload_index', label: '负载索引', required: true, default: '99-0-0', suggestionKeys: ['cameraPayloadIndexes:{gateway}', 'payloadIndexes:{gateway}'] },
+            { key: 'locked', label: '锁定机头/云台', type: 'select', default: 'true', options: ['true', 'false'] },
+            { key: 'pitch_speed', label: 'pitch 速度(rad/s)', type: 'number', default: 0 },
+            { key: 'yaw_speed', label: 'yaw 速度(rad/s)', type: 'number', default: 0 },
+            uuidParam('tid', uuid),
+            uuidParam('bid', uuid),
+            timestampParam(now)
+        ]
+    };
+}
+
 function createDrcSender({ id, name, method, group = '遥控指令' }) {
     const now = Date.now();
     return {
@@ -924,6 +1355,12 @@ module.exports = {
         createServiceSender({ id: 'control.cover.open', name: '打开舱盖', method: 'cover_open' }),
         createServiceSender({ id: 'control.cover.close', name: '关闭舱盖', method: 'cover_close' }),
         createReturnHomeSender(),
+        createTakeoffToPointSender(),
+        createFlyToPointSender(),
+        createLiveStartPushSender(),
+        createLiveStopPushSender(),
+        createStickControlSender(),
+        createCameraScreenDragSender(),
         createDrcSender({ id: 'drc.emergency_stop', name: '急停', method: 'drone_emergency_stop' }),
         createDrcSender({ id: 'drc.emergency_landing', name: '紧急降落', method: 'drc_emergency_landing' }),
         createDrcSender({ id: 'drc.force_landing', name: '强制降落', method: 'drc_force_landing' }),
@@ -934,6 +1371,7 @@ module.exports = {
     senderParamAction(request) {
         if (request.actionId === 'randomUuid') return randomUuid();
         if (request.actionId === 'currentTimestamp') return Date.now();
+        if (request.actionId === 'airportPositionPlus30') return airportPositionFill(request);
         throw new Error(`未知参数动作：${request.actionId}`);
     },
 
@@ -1022,6 +1460,32 @@ module.exports = {
         if (meta.airportSn) rememberParams.airportSn = meta.airportSn;
         if (meta.droneSn) rememberParams.droneSn = meta.droneSn;
         if (meta.gatewaySn) rememberParams.gateway = meta.gatewaySn;
+        const airportLatitude = firstFiniteNumber(body.data?.latitude);
+        const airportLongitude = firstFiniteNumber(body.data?.longitude);
+        const airportHeight = firstFiniteNumber(body.data?.height);
+        if (meta.airportSn && airportLatitude != null && airportLongitude != null && airportHeight != null) {
+            rememberParams[airportPositionKey(meta.airportSn)] = JSON.stringify({
+                latitude: airportLatitude,
+                longitude: airportLongitude,
+                height: airportHeight
+            });
+        }
+        const airportProps = meta.airportSn ? pickAirportProps(body.data) : null;
+        if (meta.airportSn && airportProps) {
+            rememberParams[airportPropsKey(meta.airportSn)] = JSON.stringify(airportProps);
+            for (const [key, value] of Object.entries(airportProps)) {
+                rememberParams[airportPropKey(meta.airportSn, key)] = typeof value === 'string' ? value : JSON.stringify(value);
+            }
+        }
+        const liveVideoIds = collectLiveVideoIds(body.data);
+        if (meta.airportSn && liveVideoIds.length) {
+            rememberParams[liveVideoIdsKey(meta.airportSn)] = liveVideoIds;
+        }
+        const payloadIndexes = collectPayloadIndexes(body.data);
+        if (meta.airportSn && payloadIndexes.length) {
+            rememberParams[payloadIndexesKey(meta.airportSn)] = payloadIndexes;
+            rememberParams[cameraPayloadIndexesKey(meta.airportSn)] = payloadIndexes;
+        }
         const replyBlocks = createReplyBlocks(body, meta);
 
         return {
